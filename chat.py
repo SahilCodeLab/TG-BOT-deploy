@@ -12,6 +12,7 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+from aiohttp import web  # ✅ NEW: Added for health check
 
 ssl._create_default_https_context = ssl._create_unverified_context
 load_dotenv()
@@ -130,6 +131,22 @@ def get_ai_response(user_text: str) -> str:
 
     return "RATE_LIMIT"
 
+# ===== HEALTH CHECK WEB SERVER =====
+async def health(request):
+    return web.Response(text="OK")
+
+async def start_web():
+    app = web.Application()
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    port = int(os.getenv("PORT", 8000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
 # ===== COMMANDS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
@@ -215,6 +232,10 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== MAIN =====
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    # ✅ NEW: Start health check web server
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_web())
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("on", on))
