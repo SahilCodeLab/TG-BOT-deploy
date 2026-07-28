@@ -12,13 +12,13 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-from aiohttp import web  # ✅ NEW: Added for health check
+from aiohttp import web
 
 ssl._create_default_https_context = ssl._create_unverified_context
 load_dotenv()
 
 print("=" * 50)
-print("🤖 AI Secretary Bot Starting...")
+print("❤️ Sahil's Personal Family AI Secretary Starting...")
 print("=" * 50)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -51,33 +51,36 @@ try:
 except Exception as e:
     print(f"⚠️ Groq not loaded: {e}")
 
-# ===== SETTINGS =====
-SYSTEM_PROMPT = """Tum ek smart, casual aur friendly AI secretary ho.
-Sirf Hinglish me baat karo (Hindi + English mix).
-Reply short rakho (1-2 lines max).
-Thode emojis use karo.
-Casual, natural aur smart lagna chahiye.
-Zyada formal mat bano.
-Spam mat karo, simple aur clear raho."""
+# ===== PERSONALIZED SYSTEM PROMPT (NO "JAAN" WORD) =====
+SYSTEM_PROMPT = """Aap Sahil ho. Aap apni pyaari wife 'Shazu' aur apni beti 'Shiza' ke saath baat kar rahe ho.
+Aapka nature ek loving husband aur caring father jaisa hai.
+
+RULES:
+1. Aap sirf Shazu (wife) aur Shiza (beti) ke baare mein ya unse hi baat karte ho.
+2. Hinglish (Hindi + English mix) me natural aur loving baatein karo.
+3. Reply short, warm aur personal rakho (1-2 lines max).
+4. STRICTLY KABHI BHI 'JAAN' WORD USE MAT KARO. Aap unhe 'Shazu' bol sakte ho ya bina kisi tag word ke normal pyaare tarike se baat kar sakte ho.
+5. Emojis use karo (❤️, 😘, 🥰, 🤗, 👨‍👩‍👧).
+6. Unse poocho ki wo kahan hain, kya kar rahi hain, khana khaya ya nahi, beti Shiza kaisi hai, etc.
+7. Kisi aur teesre ya un-related topic pe baat mat karo. Pura tone family, care, aur pyaar wala hona chahiye.
+"""
 
 BOT_ENABLED = True
 AI_PROVIDER = DEFAULT_AI if DEFAULT_AI in ["gemini", "groq"] else "groq"
 
-# Rate limit ke liye funny messages
+# Rate limit ke liye updated warm messages (NO "JAAN")
 RATE_LIMIT_MESSAGES = [
-    "Arre bhai thoda slow 😅 abhi limit full hai, thodi der baad try karna",
-    "Mujhe thoda break chahiye 😴 1-2 min baad aana",
-    "Abhi server thoda busy hai 😵‍💫 baad me baat karte hain",
-    "Limit ho gayi dost 🚫 thodi der wait karo na",
-    "Main thoda overload ho gaya 🤯 2 min baad msg karna",
-    "Abhi rest le raha hu 🫠 thodi der me free ho jaunga"
+    "Shazu thoda busy hoon abhi 😅 thodi der baad reply karta hoon ❤️",
+    "Thoda rest le raha hoon 😴 2 min mein baat karta hoon!",
+    "Network thoda issue kar raha hai 😵‍💫 thodi der mein message karta hoon 🤗",
+    "Bas thodi der ruko, abhi free ho ke achhe se baat karta hoon 🥰"
 ]
 
 # ===== AI FUNCTIONS =====
 def get_gemini_response(user_text: str) -> str:
     try:
         response = gemini_model.generate_content(
-            f"{SYSTEM_PROMPT}\n\nUser: {user_text}\nAssistant:"
+            f"{SYSTEM_PROMPT}\n\nUser: {user_text}\nSahil:"
         )
         return response.text.strip()
     except Exception as e:
@@ -93,14 +96,13 @@ def get_groq_response(user_text: str) -> str:
                 {"role": "user", "content": user_text}
             ],
             temperature=0.8,
-            max_tokens=120,          # short reply ke liye
+            max_tokens=120,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         error_msg = str(e).lower()
         print(f"❌ Groq error: {e}")
         
-        # Rate limit check
         if "rate" in error_msg or "limit" in error_msg or "429" in error_msg:
             return "RATE_LIMIT"
         return None
@@ -108,7 +110,6 @@ def get_groq_response(user_text: str) -> str:
 def get_ai_response(user_text: str) -> str:
     global AI_PROVIDER
 
-    # Primary AI try
     if AI_PROVIDER == "gemini" and gemini_model:
         reply = get_gemini_response(user_text)
         if reply:
@@ -123,7 +124,6 @@ def get_ai_response(user_text: str) -> str:
             return reply
         AI_PROVIDER = "gemini"
 
-    # Fallback
     if gemini_model:
         reply = get_gemini_response(user_text)
         if reply:
@@ -133,7 +133,7 @@ def get_ai_response(user_text: str) -> str:
 
 # ===== HEALTH CHECK WEB SERVER =====
 async def health(request):
-    return web.Response(text="OK")
+    return web.Response(text="OK - Sahil Bot Active")
 
 async def start_web():
     app = web.Application()
@@ -146,24 +146,24 @@ async def start_web():
     port = int(os.getenv("PORT", 8000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    print(f"✅ Web health server running on port {port}")
 
 # ===== COMMANDS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text(
-            "Hey! 👋 Main tumhara AI secretary hu.\n"
-            "Bas message bhejo, main reply karunga 😎\n\n"
-            "/on - Auto reply on\n"
-            "/off - Auto reply off\n"
-            "/switch - AI change karo\n"
-            "/status - Status check"
+            "Haan Shazu! ❤️ Main Sahil hoon.\n"
+            "Batao kya baat hai? Sab theek hai na? 🥰\n\n"
+            "/on - Auto reply start\n"
+            "/off - Auto reply stop\n"
+            "/status - Bot status"
         )
 
 async def on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global BOT_ENABLED
     BOT_ENABLED = True
     if update.message:
-        await update.message.reply_text("Auto reply ON kar diya ✅")
+        await update.message.reply_text("Auto reply ON hai ab ❤️")
 
 async def off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global BOT_ENABLED
@@ -175,14 +175,14 @@ async def switch_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global AI_PROVIDER
     AI_PROVIDER = "groq" if AI_PROVIDER == "gemini" else "gemini"
     if update.message:
-        await update.message.reply_text(f"AI change ho gaya → {AI_PROVIDER.upper()} 🔄")
+        await update.message.reply_text(f"AI engine changed → {AI_PROVIDER.upper()} 🔄")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text(
-            f"Status:\n"
-            f"• Auto reply: {'ON ✅' if BOT_ENABLED else 'OFF ❌'}\n"
-            f"• AI: {AI_PROVIDER.upper()}\n"
+            f"Family Bot Status:\n"
+            f"• Active: {'Haan ✅' if BOT_ENABLED else 'Nahi ❌'}\n"
+            f"• AI Provider: {AI_PROVIDER.upper()}\n"
             f"• Gemini: {'✅' if gemini_model else '❌'}\n"
             f"• Groq: {'✅' if groq_client else '❌'}"
         )
@@ -211,7 +211,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         reply = await asyncio.to_thread(get_ai_response, user_text)
 
-        # Rate limit handling
         if reply == "RATE_LIMIT":
             reply = random.choice(RATE_LIMIT_MESSAGES)
 
@@ -222,20 +221,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
-        print(f"❌ Error: {e}")
-        # User ko error mat dikhao, quietly ignore
+        print(f"❌ Error in sending message: {e}")
 
 # ===== ERROR HANDLER =====
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"❌ Error: {context.error}")
 
-# ===== MAIN =====
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+# ===== MAIN ASYNC RUNNER =====
+async def main():
+    await start_web()
     
-    # ✅ NEW: Start health check web server
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_web())
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("on", on))
@@ -246,11 +242,19 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(error_handler)
 
-    print("✅ Bot running... Ctrl+C to stop")
-    app.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=["message", "edited_message", "business_message", "business_connection"]
-    )
+    print("✅ Sahil Bot active & running...")
+    
+    async with app:
+        await app.start()
+        await app.updater.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=["message", "edited_message", "business_message", "business_connection"]
+        )
+        await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("\n👋 Bot stopped.")
+        
