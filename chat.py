@@ -14,11 +14,16 @@ from telegram.ext import (
 )
 from aiohttp import web
 
+# RAG Libraries
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
+
 ssl._create_default_https_context = ssl._create_unverified_context
 load_dotenv()
 
 print("=" * 50)
-print("❤️ Sahil's Personal Family AI Secretary Starting...")
+print("❤️ Sahil's Personal Family AI Secretary (RAG Powered) Starting...")
 print("=" * 50)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -29,8 +34,59 @@ DEFAULT_AI = os.getenv("DEFAULT_AI", "groq")
 if not BOT_TOKEN:
     raise ValueError("❌ BOT_TOKEN missing in .env")
 
-print(f"✅ BOT_TOKEN loaded")
-print(f"✅ DEFAULT_AI: {DEFAULT_AI.upper()}")
+# ===== RAG MEMORY ENGINE SETUP =====
+print("🧠 Initializing RAG Memory Engine...")
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+chat_chunks = []
+index = None
+
+def build_rag_database(file_path="chat.txt"):
+    global index, chat_chunks
+    if not os.path.exists(file_path):
+        print("⚠️ 'chat.txt' file nahi mili! Bot bina RAG memory ke chalega.")
+        return
+
+    print("📄 Reading 'chat.txt' and creating vector embeddings...")
+    with open(file_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    # Chat ko 4-4 lines ke chunks me divide kar rahe hain taaki context bana rahe
+    chunk_size = 4
+    for i in range(0, len(lines), chunk_size):
+        chunk = "".join(lines[i:i + chunk_size]).strip()
+        if chunk:
+            chat_chunks.append(chunk)
+
+    if not chat_chunks:
+        print("⚠️ 'chat.txt' khaali hai.")
+        return
+
+    # Embeddings Generate karna
+    embeddings = embedding_model.encode(chat_chunks)
+    dimension = embeddings.shape[1]
+
+    # FAISS Index create karna
+    index = faiss.IndexFlatL2(dimension)
+    index.add(np.array(embeddings).astype('float32'))
+    print(f"✅ RAG Memory Ready! Loaded {len(chat_chunks)} memory chunks into FAISS.")
+
+# Build Database on startup
+build_rag_database("chat.txt")
+
+def get_relevant_memories(query, top_k=3):
+    """Message ke aaspas ki relevant purani memories dhoondhta hai"""
+    if index is None or len(chat_chunks) == 0:
+        return "No past memory file available."
+    
+    query_vector = embedding_model.encode([query])
+    distances, indices = index.search(np.array(query_vector).astype('float32'), top_k)
+    
+    retrieved = []
+    for idx in indices[0]:
+        if idx < len(chat_chunks):
+            retrieved.append(chat_chunks[idx])
+            
+    return "\n---\n".join(retrieved)
 
 # ===== AI SETUP =====
 gemini_model = None
@@ -51,24 +107,9 @@ try:
 except Exception as e:
     print(f"⚠️ Groq not loaded: {e}")
 
-# ===== PERSONALIZED SYSTEM PROMPT (NO "JAAN" WORD) =====
-SYSTEM_PROMPT = """Aap Sahil ho. Aap apni pyaari wife 'Shazu' aur apni beti 'Shiza' ke saath baat kar rahe ho.
-Aapka nature ek loving husband aur caring father jaisa hai.
-
-RULES:
-1. Aap sirf Shazu (wife) aur Shiza (beti) ke baare mein ya unse hi baat karte ho.
-2. Hinglish (Hindi + English mix) me natural aur loving baatein karo.
-3. Reply short, warm aur personal rakho (1-2 lines max).
-4. STRICTLY KABHI BHI 'JAAN' WORD USE MAT KARO. Aap unhe 'Shazu' bol sakte ho ya bina kisi tag word ke normal pyaare tarike se baat kar sakte ho.
-5. Emojis use karo (❤️, 😘, 🥰, 🤗, 👨‍👩‍👧).
-6. Unse poocho ki wo kahan hain, kya kar rahi hain, khana khaya ya nahi, beti Shiza kaisi hai, etc.
-7. Kisi aur teesre ya un-related topic pe baat mat karo. Pura tone family, care, aur pyaar wala hona chahiye.
-"""
-
 BOT_ENABLED = True
 AI_PROVIDER = DEFAULT_AI if DEFAULT_AI in ["gemini", "groq"] else "groq"
 
-# Rate limit ke liye updated warm messages (NO "JAAN")
 RATE_LIMIT_MESSAGES = [
     "Shazu thoda busy hoon abhi 😅 thodi der baad reply karta hoon ❤️",
     "Thoda rest le raha hoon 😴 2 min mein baat karta hoon!",
@@ -76,33 +117,49 @@ RATE_LIMIT_MESSAGES = [
     "Bas thodi der ruko, abhi free ho ke achhe se baat karta hoon 🥰"
 ]
 
+# ===== DYNAMIC SYSTEM PROMPT BUILDER =====
+def build_system_prompt(retrieved_memories: str) -> str:
+    return f"""Aap Sahil ho. Aap apni pyaari wife 'Shazu' aur apni beti 'Shiza' ke saath baat kar rahe ho.
+Aapka nature ek loving husband aur caring father jaisa hai.
+
+=== RELEVANT PAST CHATS & MEMORY (FROM CHAT.TXT) ===
+{retrieved_memories}
+====================================================
+
+RULES:
+1. Upar di gayi past chats ko dekho aur HUBEHU Sahil ka bolne ka tarika, short words, emojis, aur style copy karo.
+2. Agar message me koi purani baat poochi jaye, toh upar di gayi memory ka reference lekar exact jawab do.
+3. Hinglish (Hindi + English mix) me natural aur loving baatein karo (1-2 lines max).
+4. STRICTLY KABHI BHI 'JAAN' WORD USE MAT KARO. Aap unhe 'Shazu' bol sakte ho.
+5. Emojis use karo (❤️, 😘, 🥰, 🤗, 👨‍👩‍👧).
+6. Tone bilkul asli Sahil jaisa hona chahiye, kisi AI jaisa nahi.
+"""
+
 # ===== AI FUNCTIONS =====
-def get_gemini_response(user_text: str) -> str:
+def get_gemini_response(user_text: str, memories: str) -> str:
     try:
-        response = gemini_model.generate_content(
-            f"{SYSTEM_PROMPT}\n\nUser: {user_text}\nSahil:"
-        )
+        prompt = f"{build_system_prompt(memories)}\n\nUser: {user_text}\nSahil:"
+        response = gemini_model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
         print(f"❌ Gemini error: {e}")
         return None
 
-def get_groq_response(user_text: str) -> str:
+def get_groq_response(user_text: str, memories: str) -> str:
     try:
         response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": build_system_prompt(memories)},
                 {"role": "user", "content": user_text}
             ],
-            temperature=0.8,
+            temperature=0.7,
             max_tokens=120,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         error_msg = str(e).lower()
         print(f"❌ Groq error: {e}")
-        
         if "rate" in error_msg or "limit" in error_msg or "429" in error_msg:
             return "RATE_LIMIT"
         return None
@@ -110,14 +167,18 @@ def get_groq_response(user_text: str) -> str:
 def get_ai_response(user_text: str) -> str:
     global AI_PROVIDER
 
+    # Step 1: Retrieve Relevant Memories using RAG
+    memories = get_relevant_memories(user_text, top_k=3)
+
+    # Step 2: Pass Memories to AI Models
     if AI_PROVIDER == "gemini" and gemini_model:
-        reply = get_gemini_response(user_text)
+        reply = get_gemini_response(user_text, memories)
         if reply:
             return reply
         AI_PROVIDER = "groq"
 
     if AI_PROVIDER == "groq" and groq_client:
-        reply = get_groq_response(user_text)
+        reply = get_groq_response(user_text, memories)
         if reply == "RATE_LIMIT":
             return "RATE_LIMIT"
         if reply:
@@ -125,7 +186,7 @@ def get_ai_response(user_text: str) -> str:
         AI_PROVIDER = "gemini"
 
     if gemini_model:
-        reply = get_gemini_response(user_text)
+        reply = get_gemini_response(user_text, memories)
         if reply:
             return reply
 
@@ -133,7 +194,7 @@ def get_ai_response(user_text: str) -> str:
 
 # ===== HEALTH CHECK WEB SERVER =====
 async def health(request):
-    return web.Response(text="OK - Sahil Bot Active")
+    return web.Response(text="OK - Sahil RAG Bot Active")
 
 async def start_web():
     app = web.Application()
@@ -180,9 +241,10 @@ async def switch_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text(
-            f"Family Bot Status:\n"
+            f"Family Bot Status (RAG Enabled):\n"
             f"• Active: {'Haan ✅' if BOT_ENABLED else 'Nahi ❌'}\n"
             f"• AI Provider: {AI_PROVIDER.upper()}\n"
+            f"• RAG Chunks Loaded: {len(chat_chunks)}\n"
             f"• Gemini: {'✅' if gemini_model else '❌'}\n"
             f"• Groq: {'✅' if groq_client else '❌'}"
         )
@@ -242,7 +304,7 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(error_handler)
 
-    print("✅ Sahil Bot active & running...")
+    print("✅ Sahil RAG Bot active & running...")
     
     async with app:
         await app.start()
@@ -257,4 +319,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         print("\n👋 Bot stopped.")
-        
