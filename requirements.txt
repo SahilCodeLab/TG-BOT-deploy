@@ -1,9 +1,6 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
 python-telegram-bot==20.7
-groq
 google-genai
+groq
 flask
-faiss-cpu
-sentence-transformers
-numpy
+gunicorn
+requests
