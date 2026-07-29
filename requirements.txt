@@ -1,6 +1,6 @@
+
+
 python-telegram-bot==20.7
-google-genai
+google-generativeai
 groq
 flask
-gunicorn
-requests
