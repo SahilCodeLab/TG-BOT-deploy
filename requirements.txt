@@ -1,5 +1,9 @@
-python-telegram-bot>=21.0
-python-dotenv>=1.1.1
-google-generativeai>=0.8.0
-groq>=0.9.0
-aiohttp>=3.10.0
+
+python-telegram-bot
+python-dotenv
+aiohttp
+google-generativeai
+groq
+sentence-transformers
+faiss-cpu
+numpy
