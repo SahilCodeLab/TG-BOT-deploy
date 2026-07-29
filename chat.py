@@ -4,9 +4,6 @@ import re
 import asyncio
 from flask import Flask
 from threading import Thread
-import numpy as np
-import faiss
-from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
 from groq import Groq
 from telegram import Update
@@ -32,33 +29,29 @@ if GROQ_API_KEY:
     groq_client = Groq(api_key=GROQ_API_KEY)
 
 # ==========================================
-# 2. ADVANCED RAG MEMORY ENGINE
+# 2. LIGHTWEIGHT MEMORY ENGINE (ZERO RAM LOAD)
 # ==========================================
 
-print("🧠 Initializing Deep RAG Vector Engine...", flush=True)
-# Light-weight model optimized for low memory usage on cloud servers
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-
-index = None
-chat_chunks = []
+print("🧠 Initializing Memory Engine...", flush=True)
 raw_chat_lines = []
+chat_chunks = []
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHAT_FILE_PATH = os.path.join(BASE_DIR, "chat.txt")
 
 def clean_text(text):
-    """Clean chat string for better embedding accuracy"""
+    """Clean chat string for better processing"""
     text = re.sub(r'http\S+', '', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-def build_rag_database(file_path=CHAT_FILE_PATH):
-    global index, chat_chunks, raw_chat_lines
+def build_memory_database(file_path=CHAT_FILE_PATH):
+    global raw_chat_lines, chat_chunks
     if not os.path.exists(file_path):
         print(f"⚠️ WARNING: 'chat.txt' not found at path: {file_path}", flush=True)
         return
 
-    print("📄 Reading 'chat.txt' and indexing Sahil's behavior patterns...", flush=True)
+    print("📄 Reading 'chat.txt' and indexing patterns...", flush=True)
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             raw_lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -67,8 +60,6 @@ def build_rag_database(file_path=CHAT_FILE_PATH):
         return
 
     raw_chat_lines = raw_lines
-    
-    # 4-line sliding window chunks for high context precision
     chunk_size = 4
     step = 2
     for i in range(0, len(raw_lines) - chunk_size + 1, step):
@@ -77,44 +68,34 @@ def build_rag_database(file_path=CHAT_FILE_PATH):
         if cleaned_c:
             chat_chunks.append(cleaned_c)
 
+    print(f"✅ Memory Engine Ready! Loaded {len(chat_chunks)} memory contexts.", flush=True)
+
+def retrieve_context(query):
+    """Fast & lightweight memory retrieval based on query relevance"""
     if not chat_chunks:
-        print("⚠️ 'chat.txt' is empty or has no readable text.", flush=True)
-        return
-
-    print(f"🔄 Creating embeddings for {len(chat_chunks)} chunks...", flush=True)
-    embeddings = embedding_model.encode(chat_chunks, batch_size=32, show_progress_bar=False)
-    
-    # Normalizing vectors for Cosine Similarity search
-    faiss.normalize_L2(embeddings)
-    dimension = embeddings.shape[1]
-
-    index = faiss.IndexFlatIP(dimension)
-    index.add(np.array(embeddings).astype('float32'))
-    print(f"✅ RAG Memory Engine Ready! Loaded {len(chat_chunks)} memory contexts into FAISS.", flush=True)
-
-def retrieve_context(query, k=5, score_threshold=0.22):
-    """Retrieve top-k relevant memory chunks matching Sahil's style and past facts"""
-    if index is None or len(chat_chunks) == 0:
         return "NO_MEMORY_DATABASE"
     
-    cleaned_query = clean_text(query)
-    query_vector = embedding_model.encode([cleaned_query])
-    faiss.normalize_L2(query_vector)
-    
-    scores, indices = index.search(np.array(query_vector).astype('float32'), k)
-    
-    matched_chunks = []
-    for score, idx in zip(scores[0], indices[0]):
-        if score >= score_threshold and idx < len(chat_chunks):
-            matched_chunks.append(chat_chunks[idx])
-            
-    if not matched_chunks:
+    query_words = set(clean_text(query).lower().split())
+    if not query_words:
+        return "NO_MATCH"
+
+    scored_chunks = []
+    for chunk in chat_chunks:
+        chunk_words = set(chunk.lower().split())
+        match_count = len(query_words.intersection(chunk_words))
+        if match_count > 0:
+            scored_chunks.append((match_count, chunk))
+
+    scored_chunks.sort(key=lambda x: x[0], reverse=True)
+    top_matches = [item[1] for item in scored_chunks[:3]]
+
+    if not top_matches:
         return "NO_EXACT_PAST_MATCH"
-        
-    return "\n---\n".join(matched_chunks)
+
+    return "\n---\n".join(top_matches)
 
 # Build DB on startup
-build_rag_database()
+build_memory_database()
 
 # ==========================================
 # 3. BEHAVIORAL AI PROMPT & GENERATOR
@@ -165,7 +146,7 @@ You are talking to your wife 'Shazu' on Telegram. Your task is to act, speak, an
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.35, # Low temperature to prevent hallucination while maintaining natural style
+                temperature=0.35,
                 max_tokens=100
             )
             return response.choices[0].message.content.strip()
@@ -184,21 +165,16 @@ You are talking to your wife 'Shazu' on Telegram. Your task is to act, speak, an
 # ==========================================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /start command"""
     await update.message.reply_text("Haan Shazu! ❤️ Bolo kya hua?")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for text messages"""
     msg = update.effective_message
     if not msg or not msg.text:
         return
     
-    # Send typing action to make response feel human
     await update.effective_chat.send_action("typing")
-    
     user_text = msg.text
     ai_reply = get_ai_response(user_text)
-    
     await msg.reply_text(ai_reply)
 
 # ==========================================
@@ -224,12 +200,10 @@ def main():
     print(" AI Bot Starting...", flush=True)
     print("==================================================", flush=True)
 
-    # Start health-check server thread for cloud platform deployment
     server_thread = Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
 
-    # Build Telegram Bot Application
     app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start_command))
