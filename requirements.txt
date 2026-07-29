@@ -1,9 +1,9 @@
-
-python-telegram-bot
-python-dotenv
-aiohttp
-google-generativeai
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+python-telegram-bot==20.7
 groq
-sentence-transformers
+google-genai
+flask
 faiss-cpu
+sentence-transformers
 numpy
