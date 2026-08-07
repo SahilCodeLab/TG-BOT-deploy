@@ -1,9 +1,9 @@
 """
-SahilCodeLab AI Business Assistant - Production-Grade Bot & API
+SahilCodeLab AI Business Assistant - Clean & Natural Humanized Bot
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
-Features: Persistent Memory, SQLite, Professional Pricing Engine (USD),
-          Visual Project Showcase, Native Chat-Based Contact Form, and FastAPI Server.
+Features: Smart Selective Reactions, SQLite, USD Pricing, Visual Showcase,
+          Native Contact Form, and FastAPI Server.
 """
 
 import os
@@ -57,7 +57,7 @@ SERVICES_CATALOGUE = {
     "web": {
         "title": "💻 Custom Website & Web App",
         "price": "$299 - $899+",
-        "desc": "High-performance React/Next.js/Node web apps with stunning UI/UX, SEO optimization, and fast speed.",
+        "desc": "High-performance React/Next.js/Node web apps with stunning UI/UX and SEO optimization.",
         "image": "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800"
     },
     "mobile": {
@@ -75,7 +75,7 @@ SERVICES_CATALOGUE = {
     "payment": {
         "title": "💳 Payment Gateway Integration",
         "price": "$150 - $350",
-        "desc": "Seamless integration of Stripe, Razorpay, or PayPal with secure webhooks and subscription billing.",
+        "desc": "Seamless integration of Stripe, Razorpay, or PayPal with secure webhooks and billing.",
         "image": "https://images.unsplash.com/photo-1563986768609-322da13575f3?w=800"
     },
     "ai": {
@@ -163,32 +163,28 @@ class Database:
 db = Database()
 
 # ============================================================
-# 4. BRAND AI ENGINE (SahilCodeLab Persona)
+# 4. HUMANIZED AI ENGINE (SahilCodeLab Persona)
 # ============================================================
 
 class AIEngine:
     @staticmethod
     def get_response(user_message: str, user_id: int) -> str:
-        system_prompt = f"""You are the official AI Business Representative for {BRAND_NAME} (founded by Sahil Raza). 
+        system_prompt = f"""You are a smart, neutral, and friendly AI assistant for {BRAND_NAME} (founded by Sahil Raza).
 Portfolio Studio: {BRAND_URL}
 Direct Contact Email: {CONTACT_EMAIL}
 
-Your Expertise:
-- Custom Web Apps, Mobile Apps (Flutter/Android/iOS), Full SaaS Product Development.
-- Payment Gateway Integrations (Stripe, Razorpay, PayPal).
-- AI Bots, Workflow Automation, and UI/UX Design.
-
-Tone & Style:
-- Professional, premium, confident, tech-savvy, and concise.
-- Direct-to-the-point answers.
-- Always provide contact via email ({CONTACT_EMAIL}) or portfolio ({BRAND_URL}) when clients inquire about hiring or custom quotes.
+Tone & Style Guidelines:
+- Talk completely naturally like a human developer/tech expert (Hinglish or English based on user's input).
+- Be direct, polite, neutral, and helpful. Never sound robotic, annoying, or overly dramatic.
+- Do NOT make random assumptions about the user's name.
+- If users ask about prices, web development, mobile apps, or SaaS, guide them clearly or share our email ({CONTACT_EMAIL}).
 """
         try:
             if GROQ_API_KEY:
                 resp = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
-                    temperature=0.5, max_tokens=400
+                    temperature=0.6, max_tokens=400
                 )
                 return resp.choices[0].message.content.strip()
             elif GEMINI_API_KEY:
@@ -196,22 +192,27 @@ Tone & Style:
                 resp = model.generate_content(user_message)
                 return resp.text.strip()
             else:
-                return f"Hello! Welcome to {BRAND_NAME}. Reach us directly at {CONTACT_EMAIL}."
+                return f"Hey there! Welcome to {BRAND_NAME}. How can I help you today? Reach us at {CONTACT_EMAIL}."
         except Exception as e:
             logger.error(f"AI Error: {e}")
-            return f"Feel free to email us directly at {CONTACT_EMAIL} or visit {BRAND_URL}."
+            return f"Bhai, thoda technical issue aa gaya hai. Aap mujhe seedha email kar sakte hain: {CONTACT_EMAIL}"
 
 # ============================================================
-# 5. TELEGRAM BOT HANDLERS & NATIVE CONTACT FORM
+# 5. TELEGRAM BOT HANDLERS & SELECTIVE REACTIONS
 # ============================================================
 
-# Conversation States for Contact Form
 CONTACT_NAME, CONTACT_EMAIL_STATE, CONTACT_MESSAGE = range(3)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.save_user(user.id, user.username, user.first_name)
     
+    # 🌟 Only react with 🔥 on the main /start command to feel welcoming
+    try:
+        await update.message.set_reaction(reaction="🔥")
+    except Exception:
+        pass
+
     keyboard = [
         [InlineKeyboardButton("🚀 View Services & Pricing", callback_data="menu_services")],
         [InlineKeyboardButton("📂 Our App Showcase", callback_data="menu_showcase")],
@@ -220,11 +221,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_msg = (
-        f"👋 Welcome to **{BRAND_NAME}** Official Bot!\n\n"
-        f"We build high-performance Web Apps, Mobile Applications, SaaS Products, and custom AI Solutions.\n\n"
-        f"📧 Direct Email: `{CONTACT_EMAIL}`\n"
+        f"👋 Hey! Welcome to **{BRAND_NAME}**.\n\n"
+        "We build high-performance Web Apps, Mobile Apps, SaaS Products, and custom AI Solutions.\n\n"
+        f"📧 Email: `{CONTACT_EMAIL}`\n"
         f"🌐 Portfolio: {BRAND_URL}\n\n"
-        "Explore our work or check pricing below:"
+        "Batao, aaj kya build karna hai?"
     )
     
     if update.message:
@@ -237,7 +238,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if query.data == "menu_services":
-        text = "📋 **SahilCodeLab Services & Pricing (USD)**\n\nChoose a category to view details:"
+        text = "📋 **SahilCodeLab Services & Pricing (USD)**\n\nChoose a category:"
         keyboard = [
             [InlineKeyboardButton("💻 Web Apps ($299+)", callback_data="srv_web")],
             [InlineKeyboardButton("📱 Mobile Apps ($499+)", callback_data="srv_mobile")],
@@ -251,7 +252,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("srv_"):
         key = query.data.split("_")[1]
         srv = SERVICES_CATALOGUE[key]
-        text = f"*{srv['title']}*\n\n💰 **Estimated Price:** `{srv['price']}`\n\n📖 {srv['desc']}\n\n📧 To book: `{CONTACT_EMAIL}`"
+        text = f"*{srv['title']}*\n\n💰 **Price:** `{srv['price']}`\n\n📖 {srv['desc']}\n\n📧 Contact: `{CONTACT_EMAIL}`"
         
         keyboard = [
             [InlineKeyboardButton("💼 Hire for this Project", callback_data=f"hire_{key}")],
@@ -283,9 +284,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         back_kb = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="Want us to build something custom for you?",
+            text="Want something custom built?",
             reply_markup=InlineKeyboardMarkup(back_kb)
         )
+
+    elif query.data == "menu_hire":
+        text = (
+            f"💼 **Contact & Hire {BRAND_NAME}**\n\n"
+            f"📧 **Email:** `{CONTACT_EMAIL}`\n"
+            f"🌐 **Website:** {BRAND_URL}\n\n"
+            "Ya fir yahi chat mein apke project requirements bhej sakte ho!"
+        )
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
+        await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "menu_home":
         await query.message.delete()
@@ -297,11 +308,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         db.log_lead(user.id, srv['title'], srv['price'])
         
-        text = f"✅ **Inquiry Logged!**\n\nWe received your request for *{srv['title']}* (`{srv['price']}`). You can also email us directly at `{CONTACT_EMAIL}` for faster communication."
+        text = f"✅ **Inquiry Logged!**\n\nRequest received for *{srv['title']}* (`{srv['price']}`). Hum aapse jald hi `{CONTACT_EMAIL}` par connect karenge."
         keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
         await query.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# --- Native Chat Contact Form Handlers ---
+# --- Native Chat Contact Form ---
 async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
@@ -312,19 +323,19 @@ async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await message.reply_text(
         "📝 **SahilCodeLab Contact Form**\n\n"
-        "Please enter your **Full Name** (or send /cancel to exit):",
+        "Apna **Full Name** batayein (ya /cancel dabayein):",
         parse_mode="Markdown"
     )
     return CONTACT_NAME
 
 async def contact_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['contact_name'] = update.message.text.strip()
-    await update.message.reply_text("Thanks! Now, please enter your **Email Address**:")
+    await update.message.reply_text("Badhiya! Ab apna **Email Address** dijiye:")
     return CONTACT_EMAIL_STATE
 
 async def contact_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['contact_email'] = update.message.text.strip()
-    await update.message.reply_text("Great! Now, please type your **Project Message or Requirements**:")
+    await update.message.reply_text("Awesome! Ab apne **Project ke requirements/message** type karein:")
     return CONTACT_MESSAGE
 
 async def contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -333,14 +344,20 @@ async def contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     email = context.user_data.get('contact_email')
     project_msg = update.message.text.strip()
     
-    db.log_lead(user_id, f"Custom Inquiry (Email: {email})", project_msg)
+    db.log_lead(user_id, f"Custom Inquiry ({email})", project_msg)
     
+    # 🌟 Give a thumbs-up ONLY when the contact form is successfully completed!
+    try:
+        await update.message.set_reaction(reaction="👍")
+    except Exception:
+        pass
+
     success_text = (
         f"✅ **Form Submitted Successfully!**\n\n"
         f"👤 Name: `{name}`\n"
         f"📧 Email: `{email}`\n"
         f"💬 Message: `{project_msg}`\n\n"
-        f"SahilCodeLab team will contact you soon at `{CONTACT_EMAIL}`."
+        f"Team SahilCodeLab aapse jald contact karegi."
     )
     
     keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
@@ -357,6 +374,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_msg = update.effective_message.text
     
+    # 🚫 NO random reactions on every message to prevent irritation! 
+    # Bot ab ekdum clean, neutral aur professional tarike se sirf text reply dega.
+    
     await update.effective_chat.send_action("typing")
     reply = AIEngine.get_response(user_msg, user_id)
     
@@ -367,7 +387,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 6. FASTAPI WEB SERVER
 # ============================================================
 
-app = FastAPI(title=f"{BRAND_NAME} API", version="3.7")
+app = FastAPI(title=f"{BRAND_NAME} API", version="3.9")
 
 @app.get("/")
 def home():
@@ -381,7 +401,6 @@ def run_telegram_bot():
     try:
         app_bot = Application.builder().token(BOT_TOKEN).build()
         
-        # Native Contact Form Conversation Handler
         contact_conv_handler = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(contact_start, pattern="^menu_hire$"),
@@ -400,7 +419,7 @@ def run_telegram_bot():
         app_bot.add_handler(CallbackQueryHandler(button_handler))
         app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
-        logger.info(f"✅ {BRAND_NAME} Telegram Bot polling started...")
+        logger.info(f"✅ {BRAND_NAME} Smart Selective Bot started...")
         app_bot.run_polling()
     except Exception as e:
         logger.error(f"Telegram Bot error: {e}")
