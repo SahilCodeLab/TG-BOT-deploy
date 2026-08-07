@@ -1,7 +1,9 @@
 """
-Memo AI Telegram Bot - FastAPI + Production-Grade Version
-A professional AI business assistant with persistent memory, SQLite database,
-real-time Google Sheets logging, and FastAPI web server with interactive docs.
+SahilCodeLab AI Business Assistant - Production-Grade Bot & API
+Brand: SahilCodeLab (sahilcodelab.vercel.app)
+Contact Email: sahil.dev@gmail.com
+Features: Persistent Memory, SQLite, Professional Pricing Engine (USD),
+          Visual Project Showcase, Native Chat-Based Contact Form, and FastAPI Server.
 """
 
 import os
@@ -9,214 +11,110 @@ import sys
 import json
 import logging
 import sqlite3
-import re
-import time
-from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Any, Tuple
-from threading import Thread, Lock
-from fastapi import FastAPI, BackgroundTasks, Request, Response
+from datetime import datetime
+from threading import Thread
+from fastapi import FastAPI
 import uvicorn
 import google.generativeai as genai
 from groq import Groq
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters, ContextTypes, ConversationHandler
 )
 
 # ============================================================
-# 1. CONFIGURATION
+# 1. CONFIGURATION & BRAND IDENTITY
 # ============================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-DATABASE_PATH = os.getenv("DATABASE_PATH", "memo.db")
+DATABASE_PATH = os.getenv("DATABASE_PATH", "sahilcodelab.db")
 PORT = int(os.getenv("PORT", 8000))
-ADMIN_USER_IDS = [int(x.strip()) for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip()]
-RATE_LIMIT_SECONDS = int(os.getenv("RATE_LIMIT_SECONDS", 2))
-MAX_MEMORY_ITEMS = int(os.getenv("MAX_MEMORY_ITEMS", 20))
-ENABLE_GOOGLE_SHEETS = os.getenv("ENABLE_GOOGLE_SHEETS", "false").lower() == "true"
-GOOGLE_SHEETS_RETRY = int(os.getenv("GOOGLE_SHEETS_RETRY", 3))
-GOOGLE_SHEETS_TIMEOUT = int(os.getenv("GOOGLE_SHEETS_TIMEOUT", 10))
+
+BRAND_NAME = "SahilCodeLab"
+BRAND_URL = "https://sahilcodelab.vercel.app"
+CONTACT_EMAIL = "sahil.dev@gmail.com"
 
 if not BOT_TOKEN:
     print("❌ ERROR: BOT_TOKEN Missing!", flush=True)
     sys.exit(1)
 
-# Configure AI APIs
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 if GROQ_API_KEY:
     groq_client = Groq(api_key=GROQ_API_KEY)
 
-# Logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. GOOGLE SHEETS LOGGER - PRODUCTION GRADE
+# 2. PRICING & SHOWCASE CATALOGUE (USD $ Engine)
 # ============================================================
 
-class GoogleSheetsLogger:
-    def __init__(self):
-        self.enabled = ENABLE_GOOGLE_SHEETS
-        self.spreadsheet_id = os.getenv("SPREADSHEET_ID")
-        self.credentials = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
-        self.sheet_name = "Chats"
-        self.client = None
-        self.sheet = None
-        self.initialized = False
-        self._serial_cache = None
-        self._lock = Lock()
-        self.max_retries = GOOGLE_SHEETS_RETRY
-        self.timeout = GOOGLE_SHEETS_TIMEOUT
+SERVICES_CATALOGUE = {
+    "web": {
+        "title": "💻 Custom Website & Web App",
+        "price": "$299 - $899+",
+        "desc": "High-performance React/Next.js/Node web apps with stunning UI/UX, SEO optimization, and fast speed.",
+        "image": "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800"
+    },
+    "mobile": {
+        "title": "📱 Mobile App Development (iOS & Android)",
+        "price": "$499 - $1,499+",
+        "desc": "Cross-platform Flutter apps with native performance, secure local database, and smooth animations.",
+        "image": "https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?w=800"
+    },
+    "saas": {
+        "title": "🚀 SaaS Product Architecture",
+        "price": "$999 - $2,500+",
+        "desc": "End-to-end MVP development, user authentication, dashboard UI, and scalable backend infrastructure.",
+        "image": "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800"
+    },
+    "payment": {
+        "title": "💳 Payment Gateway Integration",
+        "price": "$150 - $350",
+        "desc": "Seamless integration of Stripe, Razorpay, or PayPal with secure webhooks and subscription billing.",
+        "image": "https://images.unsplash.com/photo-1563986768609-322da13575f3?w=800"
+    },
+    "ai": {
+        "title": "🤖 AI Bots & Automation",
+        "price": "$399 - $999+",
+        "desc": "Custom Telegram/WhatsApp bots, LLM integrations (Groq/Gemini), and n8n workflow automations.",
+        "image": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800"
+    }
+}
 
-        if self.enabled and self.spreadsheet_id and self.credentials:
-            self._initialize_client()
-
-    def _initialize_client(self):
-        try:
-            import gspread
-            from oauth2client.service_account import ServiceAccountCredentials
-            
-            scope = [
-                'https://spreadsheets.google.com/feeds',
-                'https://www.googleapis.com/auth/drive'
-            ]
-            
-            creds_dict = json.loads(self.credentials)
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-            self.client = gspread.authorize(creds)
-            self.sheet = self.client.open_by_key(self.spreadsheet_id)
-            
-            self._ensure_chat_sheet()
-            self._refresh_serial_cache()
-            
-            self.initialized = True
-            self.enabled = True
-            logger.info("✅ Google Sheets production logger initialized")
-            
-        except Exception as e:
-            logger.error(f"❌ Google Sheets init failed: {e}")
-            self.enabled = False
-            self.initialized = False
-
-    def _ensure_chat_sheet(self):
-        try:
-            existing = [ws.title for ws in self.sheet.worksheets()]
-            if self.sheet_name not in existing:
-                ws = self.sheet.add_worksheet(title=self.sheet_name, rows=100000, cols=11)
-                headers = [
-                    "S.No", "Date", "Time", "Timestamp",
-                    "User ID", "Username", "Full Name",
-                    "Message Count", "Message Type",
-                    "User Message", "Bot Reply"
-                ]
-                for col_idx, header in enumerate(headers, start=1):
-                    ws.update_cell(1, col_idx, header)
-                ws.freeze(rows=1)
-        except Exception as e:
-            logger.error(f"Error creating chat sheet: {e}")
-            raise
-
-    def _refresh_serial_cache(self):
-        try:
-            ws = self.sheet.worksheet(self.sheet_name)
-            last_row_data = ws.row_values(ws.row_count)
-            if last_row_data and last_row_data[0] and str(last_row_data[0]).isdigit():
-                self._serial_cache = int(last_row_data[0])
-            else:
-                self._serial_cache = ws.row_count - 1
-        except Exception as e:
-            logger.error(f"Error refreshing serial cache: {e}")
-            self._serial_cache = 1
-
-    def _get_next_serial(self, ws) -> int:
-        with self._lock:
-            if self._serial_cache is None:
-                total_rows = ws.row_count
-                if total_rows <= 1:
-                    self._serial_cache = 1
-                else:
-                    try:
-                        last_row = ws.row_values(total_rows)
-                        if last_row and last_row[0] and str(last_row[0]).isdigit():
-                            self._serial_cache = int(last_row[0]) + 1
-                        else:
-                            self._serial_cache = total_rows - 1
-                    except:
-                        self._serial_cache = total_rows - 1
-            self._serial_cache += 1
-            return self._serial_cache
-
-    def _get_message_type(self, update: Update) -> str:
-        message = update.effective_message
-        if not message: return "Unknown"
-        if message.text: return "Text"
-        if message.photo: return "Photo"
-        if message.video: return "Video"
-        if message.voice: return "Voice"
-        if message.document: return "Document"
-        return "Other"
-
-    def _get_user_message_text(self, update: Update) -> str:
-        message = update.effective_message
-        if not message: return ""
-        if message.text: return message.text
-        if message.caption: return message.caption
-        if message.photo: return "📸 Photo"
-        if message.voice: return f"🎤 Voice Message ({message.voice.duration}s)"
-        if message.document: return f"📄 Document"
-        return "📨 Media Message"
-
-    def _get_full_name(self, user) -> str:
-        if not user: return "No Name"
-        full = f"{user.first_name or ''} {user.last_name or ''}".strip()
-        return full if full else (user.username or "No Name")
-
-    def log_chat_store_first(self, update: Update, bot_reply: str) -> bool:
-        if not self.enabled or not self.initialized: return False
-        try:
-            user = update.effective_user
-            message = update.effective_message
-            if not user or not message: return False
-            
-            ws = self.sheet.worksheet(self.sheet_name)
-            now = datetime.now()
-            serial_no = self._get_next_serial(ws)
-            
-            db_obj = Database(DATABASE_PATH)
-            usr = db_obj.get_user(user.id)
-            message_count = usr.get('total_interactions', 0) if usr else 0
-            
-            row_data = [
-                serial_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"),
-                now.isoformat(), str(user.id), user.username or 'No Username',
-                self._get_full_name(user), message_count, self._get_message_type(update),
-                self._get_user_message_text(update), bot_reply or ''
-            ]
-            ws.append_row(row_data, value_input_option='USER_ENTERED')
-            return True
-        except Exception as e:
-            logger.error(f"❌ Google Sheets log failed: {e}")
-            return False
-
-google_sheets = GoogleSheetsLogger()
+PROJECT_SHOWCASE = [
+    {
+        "name": "Aura Notes",
+        "category": "Productivity App (10K+ Downloads)",
+        "desc": "A secure offline notepad with sleek dark UI and high performance.",
+        "image": "https://images.unsplash.com/photo-1517842645767-c639042777db?w=800"
+    },
+    {
+        "name": "Wrapify",
+        "category": "Chat Analytics Platform",
+        "desc": "Parses offline logs to generate rich statistics and dynamic insight cards.",
+        "image": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800"
+    },
+    {
+        "name": "PocketID",
+        "category": "Secure Document Vault",
+        "desc": "Encrypted local digital vault with custom animations and subscription models.",
+        "image": "https://images.unsplash.com/photo-1633167606207-d840b5070fc2?w=800"
+    }
+]
 
 # ============================================================
-# 3. DATABASE CLASS
+# 3. DATABASE CLASS (Persistent Memory & Leads)
 # ============================================================
 
 class Database:
-    def __init__(self, db_path: str = "memo.db"):
+    def __init__(self, db_path: str = DATABASE_PATH):
         self.db_path = db_path
-        self._lock = Lock()
         self.init_tables()
-        self.create_indexes()
 
     def get_connection(self):
         conn = sqlite3.connect(self.db_path, timeout=30)
@@ -229,273 +127,290 @@ class Database:
             c = conn.cursor()
             c.execute('''CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
-                telegram_username TEXT,
+                username TEXT,
                 name TEXT,
-                preferred_language TEXT DEFAULT 'English',
                 joined_date TIMESTAMP,
                 last_active TIMESTAMP,
                 total_interactions INTEGER DEFAULT 0
             )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS memory (
+            c.execute('''CREATE TABLE IF NOT EXISTS leads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
-                memory_key TEXT,
-                memory_value TEXT,
-                confidence REAL DEFAULT 0.0,
-                updated_by_ai INTEGER DEFAULT 0,
-                validated INTEGER DEFAULT 0,
-                updated_at TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-                UNIQUE(user_id, memory_key)
-            )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS memory_schema (
-                key_name TEXT PRIMARY KEY,
-                description TEXT,
-                data_type TEXT,
-                max_length INTEGER,
-                default_confidence REAL DEFAULT 0.7
-            )''')
-            c.execute("SELECT COUNT(*) FROM memory_schema")
-            if c.fetchone()[0] == 0:
-                default_schema = [
-                    ('name', 'User full name', 'string', 100, 0.95),
-                    ('company', 'Company name', 'string', 200, 0.9),
-                    ('project', 'Current project name', 'string', 200, 0.9),
-                    ('preferred_language', 'Preferred language', 'string', 20, 0.95),
-                    ('goal', 'Primary goal', 'string', 500, 0.85),
-                    ('profession', 'User profession', 'string', 100, 0.9)
-                ]
-                for key, desc, dtype, maxlen, conf in default_schema:
-                    c.execute('''INSERT OR IGNORE INTO memory_schema
-                        (key_name, description, data_type, max_length, default_confidence)
-                        VALUES (?,?,?,?,?)''', (key, desc, dtype, maxlen, conf))
-            c.execute('''CREATE TABLE IF NOT EXISTS chat_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                user_message TEXT,
-                bot_reply TEXT,
-                timestamp TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS rate_limits (
-                user_id INTEGER PRIMARY KEY,
-                last_message_time TIMESTAMP,
-                message_count INTEGER DEFAULT 0,
-                FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                service_requested TEXT,
+                budget TEXT,
+                status TEXT DEFAULT 'New',
+                timestamp TIMESTAMP
             )''')
             conn.commit()
 
-    def create_indexes(self):
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute('CREATE INDEX IF NOT EXISTS idx_chat_user_id ON chat_logs(user_id)')
-            c.execute('CREATE INDEX IF NOT EXISTS idx_memory_user_key ON memory(user_id, memory_key)')
-            conn.commit()
-
-    def get_or_create_user(self, user_id: int, username: str = None, name: str = None) -> Dict:
+    def save_user(self, user_id: int, username: str, name: str):
         with self.get_connection() as conn:
             c = conn.cursor()
             c.execute("""
-                INSERT INTO users (user_id, telegram_username, name, joined_date, last_active)
+                INSERT INTO users (user_id, username, name, joined_date, last_active)
                 VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    telegram_username = COALESCE(excluded.telegram_username, telegram_username),
-                    last_active = excluded.last_active
-            """, (user_id, username, name, datetime.now().isoformat(), datetime.now().isoformat()))
-            conn.commit()
-            c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-            return dict(c.fetchone())
-
-    def update_user_name(self, user_id: int, name: str):
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute("UPDATE users SET name = ? WHERE user_id = ?", (name, user_id))
+                ON CONFLICT(user_id) DO UPDATE SET last_active = ?
+            """, (user_id, username, name, datetime.now().isoformat(), datetime.now().isoformat(), datetime.now().isoformat()))
             conn.commit()
 
-    def get_user(self, user_id: int) -> Optional[Dict]:
+    def log_lead(self, user_id: int, service: str, budget: str):
         with self.get_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-            row = c.fetchone()
-            return dict(row) if row else None
-
-    def is_valid_memory_key(self, key: str) -> bool:
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT 1 FROM memory_schema WHERE key_name = ?", (key,))
-            return c.fetchone() is not None
-
-    def get_allowed_keys(self) -> List[Dict]:
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT key_name, default_confidence FROM memory_schema")
-            return [dict(row) for row in c.fetchall()]
-
-    def save_memory(self, user_id: int, key: str, value: str, confidence: float = 0.8) -> bool:
-        if not self.is_valid_memory_key(key): return False
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute('''INSERT INTO memory (user_id, memory_key, memory_value, confidence, updated_at)
-                VALUES (?,?,?,?,?)
-                ON CONFLICT(user_id, memory_key) DO UPDATE SET
-                    memory_value = excluded.memory_value,
-                    confidence = excluded.confidence,
-                    updated_at = excluded.updated_at''',
-                (user_id, key, value, confidence, datetime.now().isoformat()))
-            conn.commit()
-            return True
-
-    def get_memory(self, user_id: int, min_confidence: float = 0.5) -> Dict[str, str]:
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute('''SELECT memory_key, memory_value FROM memory
-                WHERE user_id = ? AND confidence >= ?''', (user_id, min_confidence))
-            return {row['memory_key']: row['memory_value'] for row in c.fetchall()}
-
-    def log_chat(self, user_id: int, user_message: str, bot_reply: str):
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute("INSERT INTO chat_logs (user_id, user_message, bot_reply, timestamp) VALUES (?,?,?,?)",
-                      (user_id, user_message, bot_reply, datetime.now().isoformat()))
-            c.execute("UPDATE users SET total_interactions = total_interactions + 1, last_active = ? WHERE user_id = ?",
-                      (datetime.now().isoformat(), user_id))
+            c.execute("INSERT INTO leads (user_id, service_requested, budget, timestamp) VALUES (?,?,?,?)",
+                      (user_id, service, budget, datetime.now().isoformat()))
             conn.commit()
 
-    def get_stats(self) -> Dict:
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM users")
-            u_count = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM chat_logs")
-            m_count = c.fetchone()[0]
-            return {"total_users": u_count, "total_messages": m_count}
-
-db = Database(DATABASE_PATH)
+db = Database()
 
 # ============================================================
-# 4. AI & HANDLERS
+# 4. BRAND AI ENGINE (SahilCodeLab Persona)
 # ============================================================
 
 class AIEngine:
     @staticmethod
     def get_response(user_message: str, user_id: int) -> str:
-        memory = db.get_memory(user_id)
-        user_data = db.get_user(user_id)
-        name = memory.get('name', user_data.get('name') if user_data else None)
-        
-        prompt = f"You are Memo, a helpful AI business assistant. User name: {name or 'Friend'}."
-        
+        system_prompt = f"""You are the official AI Business Representative for {BRAND_NAME} (founded by Sahil Raza). 
+Portfolio Studio: {BRAND_URL}
+Direct Contact Email: {CONTACT_EMAIL}
+
+Your Expertise:
+- Custom Web Apps, Mobile Apps (Flutter/Android/iOS), Full SaaS Product Development.
+- Payment Gateway Integrations (Stripe, Razorpay, PayPal).
+- AI Bots, Workflow Automation, and UI/UX Design.
+
+Tone & Style:
+- Professional, premium, confident, tech-savvy, and concise.
+- Direct-to-the-point answers.
+- Always provide contact via email ({CONTACT_EMAIL}) or portfolio ({BRAND_URL}) when clients inquire about hiring or custom quotes.
+"""
         try:
             if GROQ_API_KEY:
                 resp = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
-                    messages=[{"role": "system", "content": prompt}, {"role": "user", "content": user_message}],
-                    temperature=0.6, max_tokens=500
+                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
+                    temperature=0.5, max_tokens=400
                 )
-                reply = resp.choices[0].message.content.strip()
+                return resp.choices[0].message.content.strip()
             elif GEMINI_API_KEY:
-                model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=prompt)
+                model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_prompt)
                 resp = model.generate_content(user_message)
-                reply = resp.text.strip()
+                return resp.text.strip()
             else:
-                reply = "⚠️ No AI API configured."
-            
-            db.log_chat(user_id, user_message, reply)
-            return reply
+                return f"Hello! Welcome to {BRAND_NAME}. Reach us directly at {CONTACT_EMAIL}."
         except Exception as e:
             logger.error(f"AI Error: {e}")
-            return "Technical difficulties. Please try again."
+            return f"Feel free to email us directly at {CONTACT_EMAIL} or visit {BRAND_URL}."
 
-# Telegram Bot Handlers
-NAME, COMPANY, PROJECT, LANGUAGE = range(4)
+# ============================================================
+# 5. TELEGRAM BOT HANDLERS & NATIVE CONTACT FORM
+# ============================================================
+
+# Conversation States for Contact Form
+CONTACT_NAME, CONTACT_EMAIL_STATE, CONTACT_MESSAGE = range(3)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    user_data = db.get_or_create_user(user.id, user.username)
-    if user_data.get('name'):
-        await update.message.reply_text(f"Welcome back, {user_data['name']}! How can I help you?")
-        return ConversationHandler.END
-    await update.message.reply_text("Welcome to Memo! What is your name?")
-    return NAME
+    db.save_user(user.id, user.username, user.first_name)
+    
+    keyboard = [
+        [InlineKeyboardButton("🚀 View Services & Pricing", callback_data="menu_services")],
+        [InlineKeyboardButton("📂 Our App Showcase", callback_data="menu_showcase")],
+        [InlineKeyboardButton("💼 Hire / Contact Us", callback_data="menu_hire")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    welcome_msg = (
+        f"👋 Welcome to **{BRAND_NAME}** Official Bot!\n\n"
+        f"We build high-performance Web Apps, Mobile Applications, SaaS Products, and custom AI Solutions.\n\n"
+        f"📧 Direct Email: `{CONTACT_EMAIL}`\n"
+        f"🌐 Portfolio: {BRAND_URL}\n\n"
+        "Explore our work or check pricing below:"
+    )
+    
+    if update.message:
+        await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.message.edit_text(welcome_msg, parse_mode="Markdown", reply_markup=reply_markup)
 
-async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    name = update.message.text.strip()
-    db.update_user_name(user_id, name)
-    db.save_memory(user_id, "name", name, 0.95)
-    await update.message.reply_text(f"Nice to meet you, {name}! What project are you working on?")
-    return PROJECT
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "menu_services":
+        text = "📋 **SahilCodeLab Services & Pricing (USD)**\n\nChoose a category to view details:"
+        keyboard = [
+            [InlineKeyboardButton("💻 Web Apps ($299+)", callback_data="srv_web")],
+            [InlineKeyboardButton("📱 Mobile Apps ($499+)", callback_data="srv_mobile")],
+            [InlineKeyboardButton("🚀 SaaS Products ($999+)", callback_data="srv_saas")],
+            [InlineKeyboardButton("💳 Payments ($150+)", callback_data="srv_payment")],
+            [InlineKeyboardButton("🤖 AI & Bots ($399+)", callback_data="srv_ai")],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]
+        ]
+        await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        
+    elif query.data.startswith("srv_"):
+        key = query.data.split("_")[1]
+        srv = SERVICES_CATALOGUE[key]
+        text = f"*{srv['title']}*\n\n💰 **Estimated Price:** `{srv['price']}`\n\n📖 {srv['desc']}\n\n📧 To book: `{CONTACT_EMAIL}`"
+        
+        keyboard = [
+            [InlineKeyboardButton("💼 Hire for this Project", callback_data=f"hire_{key}")],
+            [InlineKeyboardButton("⬅️ Back to Services", callback_data="menu_services")]
+        ]
+        
+        await query.message.delete()
+        await context.bot.send_photo(
+            chat_id=query.message.chat_id,
+            photo=srv['image'],
+            caption=text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-async def handle_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    elif query.data == "menu_showcase":
+        await query.message.delete()
+        for proj in PROJECT_SHOWCASE:
+            caption = f"🏆 *{proj['name']}*\n🏷️ _{proj['category']}_\n\n📝 {proj['desc']}"
+            keyboard = [[InlineKeyboardButton("🌐 Visit Portfolio", url=BRAND_URL)]]
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=proj['image'],
+                caption=caption,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        
+        back_kb = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Want us to build something custom for you?",
+            reply_markup=InlineKeyboardMarkup(back_kb)
+        )
+
+    elif query.data == "menu_home":
+        await query.message.delete()
+        await start_command(update, context)
+
+    elif query.data.startswith("hire_"):
+        key = query.data.split("_")[1]
+        srv = SERVICES_CATALOGUE[key]
+        user = update.effective_user
+        db.log_lead(user.id, srv['title'], srv['price'])
+        
+        text = f"✅ **Inquiry Logged!**\n\nWe received your request for *{srv['title']}* (`{srv['price']}`). You can also email us directly at `{CONTACT_EMAIL}` for faster communication."
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
+        await query.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+# --- Native Chat Contact Form Handlers ---
+async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+        message = query.message
+    else:
+        message = update.message
+
+    await message.reply_text(
+        "📝 **SahilCodeLab Contact Form**\n\n"
+        "Please enter your **Full Name** (or send /cancel to exit):",
+        parse_mode="Markdown"
+    )
+    return CONTACT_NAME
+
+async def contact_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['contact_name'] = update.message.text.strip()
+    await update.message.reply_text("Thanks! Now, please enter your **Email Address**:")
+    return CONTACT_EMAIL_STATE
+
+async def contact_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['contact_email'] = update.message.text.strip()
+    await update.message.reply_text("Great! Now, please type your **Project Message or Requirements**:")
+    return CONTACT_MESSAGE
+
+async def contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    project = update.message.text.strip()
-    db.save_memory(user_id, "project", project, 0.9)
-    await update.message.reply_text("All set! How can I help you today?")
+    name = context.user_data.get('contact_name')
+    email = context.user_data.get('contact_email')
+    project_msg = update.message.text.strip()
+    
+    db.log_lead(user_id, f"Custom Inquiry (Email: {email})", project_msg)
+    
+    success_text = (
+        f"✅ **Form Submitted Successfully!**\n\n"
+        f"👤 Name: `{name}`\n"
+        f"📧 Email: `{email}`\n"
+        f"💬 Message: `{project_msg}`\n\n"
+        f"SahilCodeLab team will contact you soon at `{CONTACT_EMAIL}`."
+    )
+    
+    keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
+    await update.message.reply_text(success_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    return ConversationHandler.END
+
+async def cancel_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Contact form cancelled.")
     return ConversationHandler.END
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message: return
+    if not update.effective_message or not update.effective_message.text:
+        return
     user_id = update.effective_user.id
-    await update.effective_chat.send_action("typing")
-    reply = AIEngine.get_response(update.effective_message.text or "", user_id)
+    user_msg = update.effective_message.text
     
-    if google_sheets.enabled:
-        google_sheets.log_chat_store_first(update, reply)
-        
-    await update.effective_message.reply_text(reply)
+    await update.effective_chat.send_action("typing")
+    reply = AIEngine.get_response(user_msg, user_id)
+    
+    keyboard = [[InlineKeyboardButton("🚀 Explore Services", callback_data="menu_services")]]
+    await update.effective_message.reply_text(reply, reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ============================================================
-# 5. FASTAPI WEB SERVER
+# 6. FASTAPI WEB SERVER
 # ============================================================
 
-app = FastAPI(title="Memo AI Bot API", version="3.0")
+app = FastAPI(title=f"{BRAND_NAME} API", version="3.7")
 
 @app.get("/")
 def home():
-    return {"message": "Memo AI Assistant FastAPI Backend is running."}
+    return {"brand": BRAND_NAME, "portfolio": BRAND_URL, "contact": CONTACT_EMAIL, "status": "Online"}
 
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "google_sheets": "enabled" if google_sheets.enabled else "disabled",
-        "database": "connected"
-    }
-
-@app.get("/stats")
-def stats():
-    return db.get_stats()
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 def run_telegram_bot():
-    """Run Telegram Bot in background thread"""
     try:
         app_bot = Application.builder().token(BOT_TOKEN).build()
         
-        conv_handler = ConversationHandler(
-            entry_points=[CommandHandler("start", start_command)],
+        # Native Contact Form Conversation Handler
+        contact_conv_handler = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(contact_start, pattern="^menu_hire$"),
+                CommandHandler("contact", contact_start)
+            ],
             states={
-                NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name)],
-                PROJECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_project)],
+                CONTACT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, contact_name)],
+                CONTACT_EMAIL_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, contact_email)],
+                CONTACT_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, contact_message)],
             },
-            fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+            fallbacks=[CommandHandler("cancel", cancel_contact)],
         )
-        app_bot.add_handler(conv_handler)
+        
+        app_bot.add_handler(CommandHandler("start", start_command))
+        app_bot.add_handler(contact_conv_handler)
+        app_bot.add_handler(CallbackQueryHandler(button_handler))
         app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
-        logger.info("✅ Telegram Bot polling started...")
+        logger.info(f"✅ {BRAND_NAME} Telegram Bot polling started...")
         app_bot.run_polling()
     except Exception as e:
         logger.error(f"Telegram Bot error: {e}")
 
 # ============================================================
-# 6. MAIN EXECUTION
+# 7. MAIN EXECUTION
 # ============================================================
 
 if __name__ == '__main__':
-    # Start Telegram Bot in a separate daemon thread
     bot_thread = Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
     
-    # Start FastAPI Uvicorn Server
     uvicorn.run(app, host="0.0.0.0", port=PORT)
