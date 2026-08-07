@@ -1,14 +1,11 @@
 """
-SahilCodeLab AI Business Assistant - Clean & Natural Humanized Bot
+SahilCodeLab AI Business Assistant - Scratch Clean Version
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
-Features: Smart Selective Reactions, SQLite, USD Pricing, Visual Showcase,
-          Native Contact Form, and FastAPI Server.
 """
 
 import os
 import sys
-import json
 import logging
 import sqlite3
 from datetime import datetime
@@ -24,7 +21,7 @@ from telegram.ext import (
 )
 
 # ============================================================
-# 1. CONFIGURATION & BRAND IDENTITY
+# 1. CONFIGURATION
 # ============================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -50,7 +47,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. PRICING & SHOWCASE CATALOGUE (USD $ Engine)
+# 2. SERVICES & CATALOGUE (USD Pricing)
 # ============================================================
 
 SERVICES_CATALOGUE = {
@@ -108,7 +105,7 @@ PROJECT_SHOWCASE = [
 ]
 
 # ============================================================
-# 3. DATABASE CLASS (Persistent Memory & Leads)
+# 3. DATABASE SETUP (Clean Leads & Users)
 # ============================================================
 
 class Database:
@@ -119,7 +116,6 @@ class Database:
     def get_connection(self):
         conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def init_tables(self):
@@ -129,16 +125,13 @@ class Database:
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 name TEXT,
-                joined_date TIMESTAMP,
-                last_active TIMESTAMP,
-                total_interactions INTEGER DEFAULT 0
+                joined_date TIMESTAMP
             )''')
             c.execute('''CREATE TABLE IF NOT EXISTS leads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
                 service_requested TEXT,
                 budget TEXT,
-                status TEXT DEFAULT 'New',
                 timestamp TIMESTAMP
             )''')
             conn.commit()
@@ -147,10 +140,9 @@ class Database:
         with self.get_connection() as conn:
             c = conn.cursor()
             c.execute("""
-                INSERT INTO users (user_id, username, name, joined_date, last_active)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET last_active = ?
-            """, (user_id, username, name, datetime.now().isoformat(), datetime.now().isoformat(), datetime.now().isoformat()))
+                INSERT OR IGNORE INTO users (user_id, username, name, joined_date)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, username, name, datetime.now().isoformat()))
             conn.commit()
 
     def log_lead(self, user_id: int, service: str, budget: str):
@@ -163,21 +155,20 @@ class Database:
 db = Database()
 
 # ============================================================
-# 4. HUMANIZED AI ENGINE (SahilCodeLab Persona)
+# 4. NEUTRAL AI ENGINE
 # ============================================================
 
 class AIEngine:
     @staticmethod
-    def get_response(user_message: str, user_id: int) -> str:
-        system_prompt = f"""You are a smart, neutral, and friendly AI assistant for {BRAND_NAME} (founded by Sahil Raza).
-Portfolio Studio: {BRAND_URL}
-Direct Contact Email: {CONTACT_EMAIL}
+    def get_response(user_message: str) -> str:
+        system_prompt = f"""You are a professional, neutral, and friendly AI assistant for {BRAND_NAME} (founded by Sahil Raza).
+Portfolio: {BRAND_URL}
+Contact Email: {CONTACT_EMAIL}
 
-Tone & Style Guidelines:
-- Talk completely naturally like a human developer/tech expert (Hinglish or English based on user's input).
-- Be direct, polite, neutral, and helpful. Never sound robotic, annoying, or overly dramatic.
-- Do NOT make random assumptions about the user's name.
-- If users ask about prices, web development, mobile apps, or SaaS, guide them clearly or share our email ({CONTACT_EMAIL}).
+Guidelines:
+- Talk naturally like a tech expert or developer (Hinglish or English based on the user's input).
+- Be direct, polite, and helpful. Do NOT assume or change user names randomly.
+- Guide clients regarding web apps, mobile apps, SaaS, or pricing clearly. Mention our email ({CONTACT_EMAIL}) when necessary.
 """
         try:
             if GROQ_API_KEY:
@@ -192,13 +183,13 @@ Tone & Style Guidelines:
                 resp = model.generate_content(user_message)
                 return resp.text.strip()
             else:
-                return f"Hey there! Welcome to {BRAND_NAME}. How can I help you today? Reach us at {CONTACT_EMAIL}."
+                return f"Welcome to {BRAND_NAME}. Reach us at {CONTACT_EMAIL}."
         except Exception as e:
             logger.error(f"AI Error: {e}")
-            return f"Bhai, thoda technical issue aa gaya hai. Aap mujhe seedha email kar sakte hain: {CONTACT_EMAIL}"
+            return f"Technical issue. You can email us directly at {CONTACT_EMAIL}."
 
 # ============================================================
-# 5. TELEGRAM BOT HANDLERS & SELECTIVE REACTIONS
+# 5. TELEGRAM HANDLERS
 # ============================================================
 
 CONTACT_NAME, CONTACT_EMAIL_STATE, CONTACT_MESSAGE = range(3)
@@ -207,12 +198,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.save_user(user.id, user.username, user.first_name)
     
-    # 🌟 Only react with 🔥 on the main /start command to feel welcoming
-    try:
-        await update.message.set_reaction(reaction="🔥")
-    except Exception:
-        pass
-
     keyboard = [
         [InlineKeyboardButton("🚀 View Services & Pricing", callback_data="menu_services")],
         [InlineKeyboardButton("📂 Our App Showcase", callback_data="menu_showcase")],
@@ -221,7 +206,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_msg = (
-        f"👋 Hey! Welcome to **{BRAND_NAME}**.\n\n"
+        f"👋 Welcome to **{BRAND_NAME}**!\n\n"
         "We build high-performance Web Apps, Mobile Apps, SaaS Products, and custom AI Solutions.\n\n"
         f"📧 Email: `{CONTACT_EMAIL}`\n"
         f"🌐 Portfolio: {BRAND_URL}\n\n"
@@ -312,7 +297,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
         await query.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# --- Native Chat Contact Form ---
+# --- Contact Form Conversation ---
 async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
@@ -335,7 +320,7 @@ async def contact_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def contact_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['contact_email'] = update.message.text.strip()
-    await update.message.reply_text("Awesome! Ab apne **Project ke requirements/message** type karein:")
+    await update.message.reply_text("Awesome! Ab apne **Project requirements** type karein:")
     return CONTACT_MESSAGE
 
 async def contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -346,12 +331,6 @@ async def contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     db.log_lead(user_id, f"Custom Inquiry ({email})", project_msg)
     
-    # 🌟 Give a thumbs-up ONLY when the contact form is successfully completed!
-    try:
-        await update.message.set_reaction(reaction="👍")
-    except Exception:
-        pass
-
     success_text = (
         f"✅ **Form Submitted Successfully!**\n\n"
         f"👤 Name: `{name}`\n"
@@ -371,23 +350,19 @@ async def cancel_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_message.text:
         return
-    user_id = update.effective_user.id
     user_msg = update.effective_message.text
     
-    # 🚫 NO random reactions on every message to prevent irritation! 
-    # Bot ab ekdum clean, neutral aur professional tarike se sirf text reply dega.
-    
     await update.effective_chat.send_action("typing")
-    reply = AIEngine.get_response(user_msg, user_id)
+    reply = AIEngine.get_response(user_msg)
     
     keyboard = [[InlineKeyboardButton("🚀 Explore Services", callback_data="menu_services")]]
     await update.effective_message.reply_text(reply, reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ============================================================
-# 6. FASTAPI WEB SERVER
+# 6. FASTAPI SERVER
 # ============================================================
 
-app = FastAPI(title=f"{BRAND_NAME} API", version="3.9")
+app = FastAPI(title=f"{BRAND_NAME} API", version="4.0")
 
 @app.get("/")
 def home():
@@ -419,7 +394,7 @@ def run_telegram_bot():
         app_bot.add_handler(CallbackQueryHandler(button_handler))
         app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
-        logger.info(f"✅ {BRAND_NAME} Smart Selective Bot started...")
+        logger.info(f"✅ {BRAND_NAME} Clean Bot started successfully...")
         app_bot.run_polling()
     except Exception as e:
         logger.error(f"Telegram Bot error: {e}")
