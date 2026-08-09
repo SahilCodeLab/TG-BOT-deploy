@@ -1,5 +1,5 @@
 """
-SahilCodeLab Final Tension Relief & Casual Chat Bot - Koyeb Optimized
+SahilCodeLab Final Tension Relief & Casual Chat Bot - Koyeb Main-Thread Fixed
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
 """
@@ -9,6 +9,7 @@ import sys
 import logging
 import sqlite3
 from datetime import datetime
+from threading import Thread
 from flask import Flask, jsonify
 import google.generativeai as genai
 from groq import Groq
@@ -238,10 +239,18 @@ def health():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
 # ============================================================
-# 6. MAIN EXECUTION (Direct Telegram Polling for Koyeb)
+# 6. MAIN EXECUTION (Flask in background, Bot in main thread)
 # ============================================================
 
 if __name__ == '__main__':
+    # Start Flask server in background daemon thread
+    flask_thread = Thread(
+        target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False),
+        daemon=True
+    )
+    flask_thread.start()
+    logger.info("🌐 Flask server started in background thread...")
+
     # Build Telegram Application
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -249,7 +258,7 @@ if __name__ == '__main__':
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("✨ Zoya Bot started successfully on Koyeb...")
+    logger.info("✨ Zoya Bot started successfully in main thread...")
     
-    # Run polling directly (Koyeb handles web service health via port binding)
+    # Run polling directly in the main thread (owns the proper event loop)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
