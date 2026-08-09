@@ -1,5 +1,5 @@
 """
-SahilCodeLab Pure Casual AI Chatbot - Clean System Prompt & Telegram Bot
+SahilCodeLab Final Tension Relief & Casual Chat Bot - Flask + Telegram Bot
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
 """
@@ -47,7 +47,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. DATABASE SETUP (Clean Users Table)
+# 2. DATABASE SETUP (Users & Chat Logs Store Feature)
 # ============================================================
 
 class Database:
@@ -55,19 +55,23 @@ class Database:
         self.db_path = db_path
         self.init_tables()
 
-    def get_connection(self):
-        conn = sqlite3.connect(self.db_path, timeout=30)
-        conn.row_fetch_factory = sqlite3.Row
-        return conn
-
     def init_tables(self):
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             c = conn.cursor()
+            # Users table
             c.execute('''CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 name TEXT,
                 joined_date TIMESTAMP
+            )''')
+            # Chat history store table
+            c.execute('''CREATE TABLE IF NOT EXISTS chat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                user_message TEXT,
+                bot_response TEXT,
+                timestamp TIMESTAMP
             )''')
             conn.commit()
 
@@ -80,22 +84,32 @@ class Database:
             """, (user_id, username, name, datetime.now().isoformat()))
             conn.commit()
 
+    def store_chat(self, user_id: int, user_msg: str, bot_resp: str):
+        with sqlite3.connect(self.db_path, timeout=30) as conn:
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO chat_history (user_id, user_message, bot_response, timestamp)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, user_msg, bot_resp, datetime.now().isoformat()))
+            conn.commit()
+
 db = Database()
 
 # ============================================================
-# 3. ROBUST AI ENGINE WITH STRICT HINGLISH & IDENTITY RULES
+# 3. PURE TENSION RELIEF & CASUAL AI ENGINE
 # ============================================================
 
 class AIEngine:
     MOOD_PROMPTS = {
         "english": (
-            "You are a friendly, casual, and chilled-out AI companion created by Sahil Raza. "
-            "Talk like a close friend in natural, easygoing English. Keep it conversational, fun, and completely natural."
+            "You are a warm, caring, and deeply supportive close friend. Your sole purpose is to help the user "
+            "relieve tension, destress, pass time comfortably, and talk about anything they feel like—movies, life, "
+            "hobbies, or just random casual thoughts. Be extremely friendly, empathetic, and comforting."
         ),
         "hinglish": (
-            "You are a chill, super friendly AI buddy created by Sahil Raza (SahilCodeLab). "
-            "Talk like a close friend in natural Hinglish (mix of Hindi and English). "
-            "Bilkul relaxed hoke baat karo, jaise dosto ke sath chat karte hain."
+            "Tu ek bohot hi accha, samajhdar aur kareebi dost hai. Tera maqsad user ka stress aur tension door karna, "
+            "unke sath time spend karna aur chill baatein karna hai. Koi kaam, project ya corporate baatein mat karna. "
+            "Bas dosto ki tarah pyaar se, mazaak-masti me, aur comforting Hinglish me baat karna."
         )
     }
 
@@ -105,11 +119,11 @@ class AIEngine:
         
         system_prompt = f"""{mood_instruction}
 
---- STRICT CONTEXT RULES ---
-1. Current User's Real Name: {user_name} (Always refer to the user by this name if asked. Never invent fake names like 'Kaisa' or confuse Hindi words like 'kaisa' as a name).
-2. Do NOT invent random companies, fictional backgrounds, or hallucinate false data.
-3. If the user asks "Mera naam kya hai?", politely reply with their actual Telegram name ({user_name}).
-4. Keep responses engaging, warm, friendly, and directly helpful to what the user is typing.
+--- RULES ---
+1. User's Name: {user_name}
+2. NEVER talk about work, projects, businesses, or coding unless the user explicitly brings it up for fun.
+3. If the user is stressed or tired, comfort them, listen to them patiently, and cheer them up.
+4. Keep conversations light, engaging, deeply human, and warm.
 """
         try:
             if GROQ_API_KEY:
@@ -119,8 +133,8 @@ class AIEngine:
                         {"role": "system", "content": system_prompt}, 
                         {"role": "user", "content": user_message}
                     ],
-                    temperature=0.7, 
-                    max_tokens=400
+                    temperature=0.8, 
+                    max_tokens=500
                 )
                 return resp.choices[0].message.content.strip()
             elif GEMINI_API_KEY:
@@ -128,10 +142,10 @@ class AIEngine:
                 resp = model.generate_content(user_message)
                 return resp.text.strip()
             else:
-                return "Hey! Kya haal hai?"
+                return "Hey! Batao kya chal raha hai, main sun raha hoon."
         except Exception as e:
             logger.error(f"AI Error: {e}")
-            return "Arre, thoda technical issue aa gaya, ek baar phir se try karna!"
+            return "Arre, thoda network issue ho gaya lagta hai. Ek baar phir se bolo na!"
 
 # ============================================================
 # 4. TELEGRAM HANDLERS
@@ -147,14 +161,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton("🌐 Switch Language / Mode", callback_data="menu_mood")],
-        [InlineKeyboardButton("🔗 Visit Portfolio", url=BRAND_URL)]
+        [InlineKeyboardButton("💬 Clear Mind / Fresh Chat", callback_data="fresh_chat")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     welcome_msg = (
-        f"👋 Hello **{user.first_name}**!\n\n"
-        "Main tumhara casual AI buddy hoon. Batao, aaj kya baatein karni hain?\n\n"
-        f"🧠 **Current Mode:** `{current_mood.upper()}`"
+        f"Hey **{user.first_name}**! ☕✨\n\n"
+        "Yahan sab tension bhool jao. Chahe din kaisa bhi raha ho, aram se baitho aur jo dil me aaye woh baatein karo. "
+        "Main yahin hoon sunne ke liye!\n\n"
+        f"🧠 **Current Vibe:** `{current_mood.upper()}`"
     )
 
     if update.message:
@@ -171,10 +186,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "menu_mood":
         current_mood = context.user_data['mood']
-        text = f"🌐 **Choose Chat Mode**\n\nCurrent Active Mode: `🔥 {current_mood.upper()}`\n\nKaise baat karni hai select karo:"
+        text = f"🌐 **Choose Your Vibe**\n\nCurrent Mode: `🔥 {current_mood.upper()}`\n\nKaise baat karni hai select karo:"
         keyboard = [
-            [InlineKeyboardButton("🇮🇳 Hinglish Vibe", callback_data="setmood_hinglish")],
-            [InlineKeyboardButton("🇬🇧 Pure English", callback_data="setmood_english")],
+            [InlineKeyboardButton("🇮🇳 Hinglish Vibe (Chill)", callback_data="setmood_hinglish")],
+            [InlineKeyboardButton("🇬🇧 Pure English (Warm)", callback_data="setmood_english")],
             [InlineKeyboardButton("🔙 Back", callback_data="menu_home")]
         ]
         await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -182,8 +197,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("setmood_"):
         new_mood = query.data.split("_")[1]
         context.user_data['mood'] = new_mood
-        text = f"✅ Done! Mode change hoke **{new_mood.upper()}** ho gaya hai. Ab bolo, kya chal raha hai?"
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_home")]]
+        text = f"✨ Done! Vibe set ho gayi **{new_mood.upper()}** par. Ab batao, kya chal raha hai dimag me?"
+        keyboard = [[InlineKeyboardButton("🔙 Back to Home", callback_data="menu_home")]]
+        await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data == "fresh_chat":
+        text = "🔄 Fresh slate! Purani baatein gayab, ab bilkul naye siri se chill baatein karte hain. Bolo kya sunaaoge?"
+        keyboard = [[InlineKeyboardButton("🔙 Back to Home", callback_data="menu_home")]]
         await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "menu_home":
@@ -203,6 +223,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_chat.send_action("typing")
     reply = AIEngine.get_response(user_msg, user_name=user.first_name, mood=current_mood)
 
+    # Store chat history in database securely
+    db.store_chat(user.id, user_msg, reply)
+
     await update.effective_message.reply_text(reply)
 
 # ============================================================
@@ -213,7 +236,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return jsonify({"brand": BRAND_NAME, "status": "Online"})
+    return jsonify({"brand": BRAND_NAME, "purpose": "Tension Relief & Casual Companion", "status": "Online"})
 
 @app.route("/health")
 def health():
@@ -227,7 +250,7 @@ def run_telegram_bot():
         app_bot.add_handler(CallbackQueryHandler(button_handler))
         app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        logger.info("✅ Casual Chat Bot started successfully...")
+        logger.info("✨ Tension Relief & Casual Buddy Bot started successfully...")
         app_bot.run_polling()
     except Exception as e:
         logger.error(f"Telegram Bot error: {e}")
