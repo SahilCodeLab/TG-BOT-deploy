@@ -1,5 +1,5 @@
 """
-SahilCodeLab Pure AI Chatbot - Flask + Telegram Bot (Original DB Schema)
+SahilCodeLab Pure AI Chatbot - Flask + Telegram Bot (Original DB Schema & 2 Moods)
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
 """
