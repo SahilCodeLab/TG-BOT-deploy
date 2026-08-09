@@ -1,5 +1,5 @@
 """
-SahilCodeLab Pure Casual AI Chatbot - Flask + Telegram Bot
+SahilCodeLab Pure Casual AI Chatbot - Clean System Prompt & Telegram Bot
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
 """
@@ -47,7 +47,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. DATABASE SETUP (Clean Users Table Only)
+# 2. DATABASE SETUP (Clean Users Table)
 # ============================================================
 
 class Database:
@@ -57,11 +57,11 @@ class Database:
 
     def get_connection(self):
         conn = sqlite3.connect(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
+        conn.row_fetch_factory = sqlite3.Row
         return conn
 
     def init_tables(self):
-        with self.get_connection() as conn:
+        with sqlite3.connect(self.db_path, timeout=30) as conn:
             c = conn.cursor()
             c.execute('''CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -72,7 +72,7 @@ class Database:
             conn.commit()
 
     def save_user(self, user_id: int, username: str, name: str):
-        with self.get_connection() as conn:
+        with sqlite3.connect(self.db_path, timeout=30) as conn:
             c = conn.cursor()
             c.execute("""
                 INSERT OR IGNORE INTO users (user_id, username, name, joined_date)
@@ -83,7 +83,7 @@ class Database:
 db = Database()
 
 # ============================================================
-# 3. PURE CASUAL AI ENGINE (English & Hinglish)
+# 3. ROBUST AI ENGINE WITH STRICT HINGLISH & IDENTITY RULES
 # ============================================================
 
 class AIEngine:
@@ -95,7 +95,7 @@ class AIEngine:
         "hinglish": (
             "You are a chill, super friendly AI buddy created by Sahil Raza (SahilCodeLab). "
             "Talk like a close friend in natural Hinglish (mix of Hindi and English). "
-            "Bilkul relaxed hoke baat karo, jaise dosto ke sath chat karte hain. Koi formal corporate ya project wali baatein mat karna."
+            "Bilkul relaxed hoke baat karo, jaise dosto ke sath chat karte hain."
         )
     }
 
@@ -105,11 +105,11 @@ class AIEngine:
         
         system_prompt = f"""{mood_instruction}
 
-Current User's Name: {user_name}
---- RULES ---
-- DO NOT bring up business work, project development, or random stats unless the user explicitly asks about it.
-- Just act like a cool, helpful chatting partner.
-- Keep responses engaging, warm, and direct.
+--- STRICT CONTEXT RULES ---
+1. Current User's Real Name: {user_name} (Always refer to the user by this name if asked. Never invent fake names like 'Kaisa' or confuse Hindi words like 'kaisa' as a name).
+2. Do NOT invent random companies, fictional backgrounds, or hallucinate false data.
+3. If the user asks "Mera naam kya hai?", politely reply with their actual Telegram name ({user_name}).
+4. Keep responses engaging, warm, friendly, and directly helpful to what the user is typing.
 """
         try:
             if GROQ_API_KEY:
@@ -119,7 +119,7 @@ Current User's Name: {user_name}
                         {"role": "system", "content": system_prompt}, 
                         {"role": "user", "content": user_message}
                     ],
-                    temperature=0.8, 
+                    temperature=0.7, 
                     max_tokens=400
                 )
                 return resp.choices[0].message.content.strip()
