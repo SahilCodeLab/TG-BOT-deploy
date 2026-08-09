@@ -1,5 +1,5 @@
 """
-SahilCodeLab AI Business Assistant - Scratch Clean Version
+SahilCodeLab Pure AI Chatbot - Multi-Mood & Database Version
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
 """
@@ -17,7 +17,7 @@ from groq import Groq
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    filters, ContextTypes, ConversationHandler
+    filters, ContextTypes
 )
 
 # ============================================================
@@ -33,6 +33,7 @@ PORT = int(os.getenv("PORT", 8000))
 BRAND_NAME = "SahilCodeLab"
 BRAND_URL = "https://sahilcodelab.vercel.app"
 CONTACT_EMAIL = "sahil.dev@gmail.com"
+FOUNDER_NAME = "Sahil Raza"
 
 if not BOT_TOKEN:
     print("❌ ERROR: BOT_TOKEN Missing!", flush=True)
@@ -47,65 +48,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. SERVICES & CATALOGUE (USD Pricing)
-# ============================================================
-
-SERVICES_CATALOGUE = {
-    "web": {
-        "title": "💻 Custom Website & Web App",
-        "price": "$299 - $899+",
-        "desc": "High-performance React/Next.js/Node web apps with stunning UI/UX and SEO optimization.",
-        "image": "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800"
-    },
-    "mobile": {
-        "title": "📱 Mobile App Development (iOS & Android)",
-        "price": "$499 - $1,499+",
-        "desc": "Cross-platform Flutter apps with native performance, secure local database, and smooth animations.",
-        "image": "https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?w=800"
-    },
-    "saas": {
-        "title": "🚀 SaaS Product Architecture",
-        "price": "$999 - $2,500+",
-        "desc": "End-to-end MVP development, user authentication, dashboard UI, and scalable backend infrastructure.",
-        "image": "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800"
-    },
-    "payment": {
-        "title": "💳 Payment Gateway Integration",
-        "price": "$150 - $350",
-        "desc": "Seamless integration of Stripe, Razorpay, or PayPal with secure webhooks and billing.",
-        "image": "https://images.unsplash.com/photo-1563986768609-322da13575f3?w=800"
-    },
-    "ai": {
-        "title": "🤖 AI Bots & Automation",
-        "price": "$399 - $999+",
-        "desc": "Custom Telegram/WhatsApp bots, LLM integrations (Groq/Gemini), and n8n workflow automations.",
-        "image": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800"
-    }
-}
-
-PROJECT_SHOWCASE = [
-    {
-        "name": "Aura Notes",
-        "category": "Productivity App (10K+ Downloads)",
-        "desc": "A secure offline notepad with sleek dark UI and high performance.",
-        "image": "https://images.unsplash.com/photo-1517842645767-c639042777db?w=800"
-    },
-    {
-        "name": "Wrapify",
-        "category": "Chat Analytics Platform",
-        "desc": "Parses offline logs to generate rich statistics and dynamic insight cards.",
-        "image": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800"
-    },
-    {
-        "name": "PocketID",
-        "category": "Secure Document Vault",
-        "desc": "Encrypted local digital vault with custom animations and subscription models.",
-        "image": "https://images.unsplash.com/photo-1633167606207-d840b5070fc2?w=800"
-    }
-]
-
-# ============================================================
-# 3. DATABASE SETUP (Clean Leads & Users)
+# 2. DATABASE SETUP (Users, Moods & Chat Logs)
 # ============================================================
 
 class Database:
@@ -125,13 +68,19 @@ class Database:
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 name TEXT,
+                mood TEXT DEFAULT 'casual',
                 joined_date TIMESTAMP
             )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS leads (
+            c.execute("PRAGMA table_info(users)")
+            columns = [col[1] for col in c.fetchall()]
+            if 'mood' not in columns:
+                c.execute("ALTER TABLE users ADD COLUMN mood TEXT DEFAULT 'casual'")
+
+            c.execute('''CREATE TABLE IF NOT EXISTS chat_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
-                service_requested TEXT,
-                budget TEXT,
+                user_message TEXT,
+                bot_response TEXT,
                 timestamp TIMESTAMP
             )''')
             conn.commit()
@@ -140,42 +89,84 @@ class Database:
         with self.get_connection() as conn:
             c = conn.cursor()
             c.execute("""
-                INSERT OR IGNORE INTO users (user_id, username, name, joined_date)
-                VALUES (?, ?, ?, ?)
+                INSERT OR IGNORE INTO users (user_id, username, name, mood, joined_date)
+                VALUES (?, ?, ?, 'casual', ?)
             """, (user_id, username, name, datetime.now().isoformat()))
             conn.commit()
 
-    def log_lead(self, user_id: int, service: str, budget: str):
+    def get_user_mood(self, user_id: int) -> str:
         with self.get_connection() as conn:
             c = conn.cursor()
-            c.execute("INSERT INTO leads (user_id, service_requested, budget, timestamp) VALUES (?,?,?,?)",
-                      (user_id, service, budget, datetime.now().isoformat()))
+            c.execute("SELECT mood FROM users WHERE user_id = ?", (user_id,))
+            row = c.fetchone()
+            return row["mood"] if row and row["mood"] else "casual"
+
+    def set_user_mood(self, user_id: int, mood: str):
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            c.execute("UPDATE users SET mood = ? WHERE user_id = ?", (mood, user_id))
+            conn.commit()
+
+    def log_chat(self, user_id: int, user_msg: str, bot_resp: str):
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO chat_logs (user_id, user_message, bot_response, timestamp) VALUES (?,?,?,?)",
+                      (user_id, user_msg, bot_resp, datetime.now().isoformat()))
             conn.commit()
 
 db = Database()
 
 # ============================================================
-# 4. NEUTRAL AI ENGINE
+# 3. MULTI-MOOD AI ENGINE
 # ============================================================
 
 class AIEngine:
+    MOOD_PROMPTS = {
+        "normal": (
+            "You are a professional, direct, and efficient AI assistant created by Sahil Raza (SahilCodeLab). "
+            "Keep responses clear, concise, and structured."
+        ),
+        "supportive": (
+            "You are a warm, highly empathetic, encouraging, and supportive AI assistant created by Sahil Raza (SahilCodeLab). "
+            "Validate user thoughts with genuine care, positivity, and warmth."
+        ),
+        "casual": (
+            "You are a chill, super user-friendly AI buddy created by Sahil Raza (SahilCodeLab) chatting in natural Hinglish or English. "
+            "Talk like a relaxed friend, without corporate robot talk."
+        ),
+        "geek": (
+            "You are a hardcore tech expert and developer AI created by Sahil Raza (SahilCodeLab). "
+            "Discuss software engineering, coding logic, and system architecture with precision."
+        )
+    }
+
     @staticmethod
-    def get_response(user_message: str) -> str:
-        system_prompt = f"""You are a professional, neutral, and friendly AI assistant for {BRAND_NAME} (founded by Sahil Raza).
-Portfolio: {BRAND_URL}
+    def get_response(user_message: str, user_name: str = "User", mood: str = "casual") -> str:
+        mood_instruction = AIEngine.MOOD_PROMPTS.get(mood, AIEngine.MOOD_PROMPTS["casual"])
+        
+        system_prompt = f"""{mood_instruction}
+
+--- DEVELOPER INFO ---
+Brand Name: {BRAND_NAME}
+Creator & Developer: {FOUNDER_NAME}
+Portfolio Website: {BRAND_URL}
 Contact Email: {CONTACT_EMAIL}
 
-Guidelines:
-- Talk naturally like a tech expert or developer (Hinglish or English based on the user's input).
-- Be direct, polite, and helpful. Do NOT assume or change user names randomly.
-- Guide clients regarding web apps, mobile apps, SaaS, or pricing clearly. Mention our email ({CONTACT_EMAIL}) when necessary.
+Current User's Name: {user_name}
+--- RULES ---
+- DO NOT treat random words as names or hallucinate false memory context.
+- Keep responses conversational, natural, and directly helpful to what the user asks.
 """
         try:
             if GROQ_API_KEY:
                 resp = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
-                    temperature=0.6, max_tokens=400
+                    messages=[
+                        {"role": "system", "content": system_prompt}, 
+                        {"role": "user", "content": user_message}
+                    ],
+                    temperature=0.7, 
+                    max_tokens=500
                 )
                 return resp.choices[0].message.content.strip()
             elif GEMINI_API_KEY:
@@ -183,36 +174,33 @@ Guidelines:
                 resp = model.generate_content(user_message)
                 return resp.text.strip()
             else:
-                return f"Welcome to {BRAND_NAME}. Reach us at {CONTACT_EMAIL}."
+                return f"Hello! I'm an AI assistant by {BRAND_NAME}."
         except Exception as e:
             logger.error(f"AI Error: {e}")
-            return f"Technical issue. You can email us directly at {CONTACT_EMAIL}."
+            return "Oops! Kuch technical issue hai, thodi der me try karo."
 
 # ============================================================
-# 5. TELEGRAM HANDLERS
+# 4. TELEGRAM HANDLERS
 # ============================================================
-
-CONTACT_NAME, CONTACT_EMAIL_STATE, CONTACT_MESSAGE = range(3)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.save_user(user.id, user.username, user.first_name)
-    
+    current_mood = db.get_user_mood(user.id)
+
     keyboard = [
-        [InlineKeyboardButton("🚀 View Services & Pricing", callback_data="menu_services")],
-        [InlineKeyboardButton("📂 Our App Showcase", callback_data="menu_showcase")],
-        [InlineKeyboardButton("💼 Hire / Contact Us", callback_data="menu_hire")]
+        [InlineKeyboardButton("🎭 Change Chat Mood", callback_data="menu_mood")],
+        [InlineKeyboardButton("🌐 Visit Portfolio", url=BRAND_URL)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     welcome_msg = (
-        f"👋 Welcome to **{BRAND_NAME}**!\n\n"
-        "We build high-performance Web Apps, Mobile Apps, SaaS Products, and custom AI Solutions.\n\n"
-        f"📧 Email: `{CONTACT_EMAIL}`\n"
-        f"🌐 Portfolio: {BRAND_URL}\n\n"
-        "Batao, aaj kya build karna hai?"
+        f"👋 Hello **{user.first_name}**!\n\n"
+        f"I am your AI companion powered by **{BRAND_NAME}** (Developer: {FOUNDER_NAME}).\n\n"
+        f"🧠 **Current Mood:** `{current_mood.upper()}`\n\n"
+        "Kuch bhi pucho ya chat shuru karo!"
     )
-    
+
     if update.message:
         await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=reply_markup)
     elif update.callback_query:
@@ -221,152 +209,56 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    if query.data == "menu_services":
-        text = "📋 **SahilCodeLab Services & Pricing (USD)**\n\nChoose a category:"
+    user_id = query.from_user.id
+
+    if query.data == "menu_mood":
+        current_mood = db.get_user_mood(user_id)
+        text = f"🎭 **Choose Chatbot Mood**\n\nCurrent Active Mood: `🔥 {current_mood.upper()}`\n\nSelect how you want me to chat with you:"
         keyboard = [
-            [InlineKeyboardButton("💻 Web Apps ($299+)", callback_data="srv_web")],
-            [InlineKeyboardButton("📱 Mobile Apps ($499+)", callback_data="srv_mobile")],
-            [InlineKeyboardButton("🚀 SaaS Products ($999+)", callback_data="srv_saas")],
-            [InlineKeyboardButton("💳 Payments ($150+)", callback_data="srv_payment")],
-            [InlineKeyboardButton("🤖 AI & Bots ($399+)", callback_data="srv_ai")],
-            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]
+            [InlineKeyboardButton("💼 Normal / Professional", callback_data="setmood_normal")],
+            [InlineKeyboardButton("🤗 Supportive & Empathetic", callback_data="setmood_supportive")],
+            [InlineKeyboardButton("😎 Casual & Friendly", callback_data="setmood_casual")],
+            [InlineKeyboardButton("⚡ Geek / Tech Expert", callback_data="setmood_geek")],
+            [InlineKeyboardButton("🔙 Back", callback_data="menu_home")]
         ]
         await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-        
-    elif query.data.startswith("srv_"):
-        key = query.data.split("_")[1]
-        srv = SERVICES_CATALOGUE[key]
-        text = f"*{srv['title']}*\n\n💰 **Price:** `{srv['price']}`\n\n📖 {srv['desc']}\n\n📧 Contact: `{CONTACT_EMAIL}`"
-        
-        keyboard = [
-            [InlineKeyboardButton("💼 Hire for this Project", callback_data=f"hire_{key}")],
-            [InlineKeyboardButton("⬅️ Back to Services", callback_data="menu_services")]
-        ]
-        
-        await query.message.delete()
-        await context.bot.send_photo(
-            chat_id=query.message.chat_id,
-            photo=srv['image'],
-            caption=text,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
 
-    elif query.data == "menu_showcase":
-        await query.message.delete()
-        for proj in PROJECT_SHOWCASE:
-            caption = f"🏆 *{proj['name']}*\n🏷️ _{proj['category']}_\n\n📝 {proj['desc']}"
-            keyboard = [[InlineKeyboardButton("🌐 Visit Portfolio", url=BRAND_URL)]]
-            await context.bot.send_photo(
-                chat_id=query.message.chat_id,
-                photo=proj['image'],
-                caption=caption,
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        
-        back_kb = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="Want something custom built?",
-            reply_markup=InlineKeyboardMarkup(back_kb)
-        )
-
-    elif query.data == "menu_hire":
-        text = (
-            f"💼 **Contact & Hire {BRAND_NAME}**\n\n"
-            f"📧 **Email:** `{CONTACT_EMAIL}`\n"
-            f"🌐 **Website:** {BRAND_URL}\n\n"
-            "Ya fir yahi chat mein apke project requirements bhej sakte ho!"
-        )
-        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
+    elif query.data.startswith("setmood_"):
+        new_mood = query.data.split("_")[1]
+        db.set_user_mood(user_id, new_mood)
+        text = f"✅ **Mood updated to `{new_mood.upper()}`!**\n\nAb batao, kya chal raha hai?"
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_home")]]
         await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "menu_home":
         await query.message.delete()
         await start_command(update, context)
 
-    elif query.data.startswith("hire_"):
-        key = query.data.split("_")[1]
-        srv = SERVICES_CATALOGUE[key]
-        user = update.effective_user
-        db.log_lead(user.id, srv['title'], srv['price'])
-        
-        text = f"✅ **Inquiry Logged!**\n\nRequest received for *{srv['title']}* (`{srv['price']}`). Hum aapse jald hi `{CONTACT_EMAIL}` par connect karenge."
-        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
-        await query.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-
-# --- Contact Form Conversation ---
-async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if query:
-        await query.answer()
-        message = query.message
-    else:
-        message = update.message
-
-    await message.reply_text(
-        "📝 **SahilCodeLab Contact Form**\n\n"
-        "Apna **Full Name** batayein (ya /cancel dabayein):",
-        parse_mode="Markdown"
-    )
-    return CONTACT_NAME
-
-async def contact_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['contact_name'] = update.message.text.strip()
-    await update.message.reply_text("Badhiya! Ab apna **Email Address** dijiye:")
-    return CONTACT_EMAIL_STATE
-
-async def contact_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['contact_email'] = update.message.text.strip()
-    await update.message.reply_text("Awesome! Ab apne **Project requirements** type karein:")
-    return CONTACT_MESSAGE
-
-async def contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    name = context.user_data.get('contact_name')
-    email = context.user_data.get('contact_email')
-    project_msg = update.message.text.strip()
-    
-    db.log_lead(user_id, f"Custom Inquiry ({email})", project_msg)
-    
-    success_text = (
-        f"✅ **Form Submitted Successfully!**\n\n"
-        f"👤 Name: `{name}`\n"
-        f"📧 Email: `{email}`\n"
-        f"💬 Message: `{project_msg}`\n\n"
-        f"Team SahilCodeLab aapse jald contact karegi."
-    )
-    
-    keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_home")]]
-    await update.message.reply_text(success_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ConversationHandler.END
-
-async def cancel_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Contact form cancelled.")
-    return ConversationHandler.END
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_message.text:
         return
+    user = update.effective_user
     user_msg = update.effective_message.text
-    
+
+    current_mood = db.get_user_mood(user.id)
+
     await update.effective_chat.send_action("typing")
-    reply = AIEngine.get_response(user_msg)
-    
-    keyboard = [[InlineKeyboardButton("🚀 Explore Services", callback_data="menu_services")]]
-    await update.effective_message.reply_text(reply, reply_markup=InlineKeyboardMarkup(keyboard))
+    reply = AIEngine.get_response(user_msg, user_name=user.first_name, mood=current_mood)
+
+    # Save chat interaction in database
+    db.log_chat(user.id, user_msg, reply)
+
+    await update.effective_message.reply_text(reply)
 
 # ============================================================
-# 6. FASTAPI SERVER
+# 5. FASTAPI SERVER
 # ============================================================
 
-app = FastAPI(title=f"{BRAND_NAME} API", version="4.0")
+app = FastAPI(title=f"{BRAND_NAME} Pure Chat API", version="5.0")
 
 @app.get("/")
 def home():
-    return {"brand": BRAND_NAME, "portfolio": BRAND_URL, "contact": CONTACT_EMAIL, "status": "Online"}
+    return {"brand": BRAND_NAME, "developer": FOUNDER_NAME, "status": "Online"}
 
 @app.get("/health")
 def health():
@@ -375,36 +267,22 @@ def health():
 def run_telegram_bot():
     try:
         app_bot = Application.builder().token(BOT_TOKEN).build()
-        
-        contact_conv_handler = ConversationHandler(
-            entry_points=[
-                CallbackQueryHandler(contact_start, pattern="^menu_hire$"),
-                CommandHandler("contact", contact_start)
-            ],
-            states={
-                CONTACT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, contact_name)],
-                CONTACT_EMAIL_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, contact_email)],
-                CONTACT_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, contact_message)],
-            },
-            fallbacks=[CommandHandler("cancel", cancel_contact)],
-        )
-        
+
         app_bot.add_handler(CommandHandler("start", start_command))
-        app_bot.add_handler(contact_conv_handler)
         app_bot.add_handler(CallbackQueryHandler(button_handler))
         app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        
-        logger.info(f"✅ {BRAND_NAME} Clean Bot started successfully...")
+
+        logger.info(f"✅ {BRAND_NAME} Pure Chat Bot started successfully...")
         app_bot.run_polling()
     except Exception as e:
         logger.error(f"Telegram Bot error: {e}")
 
 # ============================================================
-# 7. MAIN EXECUTION
+# 6. MAIN EXECUTION
 # ============================================================
 
 if __name__ == '__main__':
     bot_thread = Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
-    
+
     uvicorn.run(app, host="0.0.0.0", port=PORT)
