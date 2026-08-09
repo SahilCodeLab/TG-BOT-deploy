@@ -1,5 +1,5 @@
 """
-SahilCodeLab Pure AI Chatbot - Multi-Mood & Database Version
+SahilCodeLab Pure AI Chatbot - Original DB Structure & 2-Moods (English/Hinglish)
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
 """
@@ -48,7 +48,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. DATABASE SETUP (Users, Moods & Chat Logs)
+# 2. DATABASE SETUP (Original Schema: users & leads)
 # ============================================================
 
 class Database:
@@ -68,19 +68,13 @@ class Database:
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 name TEXT,
-                mood TEXT DEFAULT 'casual',
                 joined_date TIMESTAMP
             )''')
-            c.execute("PRAGMA table_info(users)")
-            columns = [col[1] for col in c.fetchall()]
-            if 'mood' not in columns:
-                c.execute("ALTER TABLE users ADD COLUMN mood TEXT DEFAULT 'casual'")
-
-            c.execute('''CREATE TABLE IF NOT EXISTS chat_logs (
+            c.execute('''CREATE TABLE IF NOT EXISTS leads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
-                user_message TEXT,
-                bot_response TEXT,
+                service_requested TEXT,
+                budget TEXT,
                 timestamp TIMESTAMP
             )''')
             conn.commit()
@@ -89,60 +83,39 @@ class Database:
         with self.get_connection() as conn:
             c = conn.cursor()
             c.execute("""
-                INSERT OR IGNORE INTO users (user_id, username, name, mood, joined_date)
-                VALUES (?, ?, ?, 'casual', ?)
+                INSERT OR IGNORE INTO users (user_id, username, name, joined_date)
+                VALUES (?, ?, ?, ?)
             """, (user_id, username, name, datetime.now().isoformat()))
             conn.commit()
 
-    def get_user_mood(self, user_id: int) -> str:
+    def log_lead(self, user_id: int, service: str, budget: str):
         with self.get_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT mood FROM users WHERE user_id = ?", (user_id,))
-            row = c.fetchone()
-            return row["mood"] if row and row["mood"] else "casual"
-
-    def set_user_mood(self, user_id: int, mood: str):
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute("UPDATE users SET mood = ? WHERE user_id = ?", (mood, user_id))
-            conn.commit()
-
-    def log_chat(self, user_id: int, user_msg: str, bot_resp: str):
-        with self.get_connection() as conn:
-            c = conn.cursor()
-            c.execute("INSERT INTO chat_logs (user_id, user_message, bot_response, timestamp) VALUES (?,?,?,?)",
-                      (user_id, user_msg, bot_resp, datetime.now().isoformat()))
+            c.execute("INSERT INTO leads (user_id, service_requested, budget, timestamp) VALUES (?,?,?,?)",
+                      (user_id, service, budget, datetime.now().isoformat()))
             conn.commit()
 
 db = Database()
 
 # ============================================================
-# 3. MULTI-MOOD AI ENGINE
+# 3. 2-MOOD AI ENGINE (English & Hinglish)
 # ============================================================
 
 class AIEngine:
     MOOD_PROMPTS = {
-        "normal": (
-            "You are a professional, direct, and efficient AI assistant created by Sahil Raza (SahilCodeLab). "
-            "Keep responses clear, concise, and structured."
+        "english": (
+            "You are a professional, clear, and friendly AI assistant created by Sahil Raza (SahilCodeLab). "
+            "Always respond strictly in clear, professional English."
         ),
-        "supportive": (
-            "You are a warm, highly empathetic, encouraging, and supportive AI assistant created by Sahil Raza (SahilCodeLab). "
-            "Validate user thoughts with genuine care, positivity, and warmth."
-        ),
-        "casual": (
-            "You are a chill, super user-friendly AI buddy created by Sahil Raza (SahilCodeLab) chatting in natural Hinglish or English. "
-            "Talk like a relaxed friend, without corporate robot talk."
-        ),
-        "geek": (
-            "You are a hardcore tech expert and developer AI created by Sahil Raza (SahilCodeLab). "
-            "Discuss software engineering, coding logic, and system architecture with precision."
+        "hinglish": (
+            "You are a chill, user-friendly AI buddy created by Sahil Raza (SahilCodeLab). "
+            "Talk in natural Hinglish (mix of Hindi and English) like a relaxed developer friend."
         )
     }
 
     @staticmethod
-    def get_response(user_message: str, user_name: str = "User", mood: str = "casual") -> str:
-        mood_instruction = AIEngine.MOOD_PROMPTS.get(mood, AIEngine.MOOD_PROMPTS["casual"])
+    def get_response(user_message: str, user_name: str = "User", mood: str = "hinglish") -> str:
+        mood_instruction = AIEngine.MOOD_PROMPTS.get(mood, AIEngine.MOOD_PROMPTS["hinglish"])
         
         system_prompt = f"""{mood_instruction}
 
@@ -154,7 +127,7 @@ Contact Email: {CONTACT_EMAIL}
 
 Current User's Name: {user_name}
 --- RULES ---
-- DO NOT treat random words as names or hallucinate false memory context.
+- DO NOT treat random text words as names or hallucinate false memory context.
 - Keep responses conversational, natural, and directly helpful to what the user asks.
 """
         try:
@@ -186,18 +159,21 @@ Current User's Name: {user_name}
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.save_user(user.id, user.username, user.first_name)
-    current_mood = db.get_user_mood(user.id)
+    
+    if 'mood' not in context.user_data:
+        context.user_data['mood'] = 'hinglish'
+    current_mood = context.user_data['mood']
 
     keyboard = [
-        [InlineKeyboardButton("🎭 Change Chat Mood", callback_data="menu_mood")],
-        [InlineKeyboardButton("🌐 Visit Portfolio", url=BRAND_URL)]
+        [InlineKeyboardButton("🌐 Switch Chat Mood", callback_data="menu_mood")],
+        [InlineKeyboardButton("🔗 Visit Portfolio", url=BRAND_URL)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     welcome_msg = (
         f"👋 Hello **{user.first_name}**!\n\n"
         f"I am your AI companion powered by **{BRAND_NAME}** (Developer: {FOUNDER_NAME}).\n\n"
-        f"🧠 **Current Mood:** `{current_mood.upper()}`\n\n"
+        f"🧠 **Current Mode:** `{current_mood.upper()}`\n\n"
         "Kuch bhi pucho ya chat shuru karo!"
     )
 
@@ -209,24 +185,24 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
+
+    if 'mood' not in context.user_data:
+        context.user_data['mood'] = 'hinglish'
 
     if query.data == "menu_mood":
-        current_mood = db.get_user_mood(user_id)
-        text = f"🎭 **Choose Chatbot Mood**\n\nCurrent Active Mood: `🔥 {current_mood.upper()}`\n\nSelect how you want me to chat with you:"
+        current_mood = context.user_data['mood']
+        text = f"🌐 **Choose Language / Chat Mode**\n\nCurrent Active Mode: `🔥 {current_mood.upper()}`\n\nSelect how you want me to talk with you:"
         keyboard = [
-            [InlineKeyboardButton("💼 Normal / Professional", callback_data="setmood_normal")],
-            [InlineKeyboardButton("🤗 Supportive & Empathetic", callback_data="setmood_supportive")],
-            [InlineKeyboardButton("😎 Casual & Friendly", callback_data="setmood_casual")],
-            [InlineKeyboardButton("⚡ Geek / Tech Expert", callback_data="setmood_geek")],
+            [InlineKeyboardButton("🇮🇳 Hinglish Vibe", callback_data="setmood_hinglish")],
+            [InlineKeyboardButton("🇬🇧 Pure English", callback_data="setmood_english")],
             [InlineKeyboardButton("🔙 Back", callback_data="menu_home")]
         ]
         await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data.startswith("setmood_"):
         new_mood = query.data.split("_")[1]
-        db.set_user_mood(user_id, new_mood)
-        text = f"✅ **Mood updated to `{new_mood.upper()}`!**\n\nAb batao, kya chal raha hai?"
+        context.user_data['mood'] = new_mood
+        text = f"✅ **Mode updated to `{new_mood.upper()}`!**\n\nAb batao, kya chal raha hai?"
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_home")]]
         await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -240,13 +216,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_msg = update.effective_message.text
 
-    current_mood = db.get_user_mood(user.id)
+    if 'mood' not in context.user_data:
+        context.user_data['mood'] = 'hinglish'
+    current_mood = context.user_data['mood']
 
     await update.effective_chat.send_action("typing")
     reply = AIEngine.get_response(user_msg, user_name=user.first_name, mood=current_mood)
-
-    # Save chat interaction in database
-    db.log_chat(user.id, user_msg, reply)
 
     await update.effective_message.reply_text(reply)
 
@@ -254,7 +229,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 5. FASTAPI SERVER
 # ============================================================
 
-app = FastAPI(title=f"{BRAND_NAME} Pure Chat API", version="5.0")
+app = FastAPI(title=f"{BRAND_NAME} 2-Mood Chat API", version="5.2")
 
 @app.get("/")
 def home():
@@ -272,7 +247,7 @@ def run_telegram_bot():
         app_bot.add_handler(CallbackQueryHandler(button_handler))
         app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        logger.info(f"✅ {BRAND_NAME} Pure Chat Bot started successfully...")
+        logger.info(f"✅ {BRAND_NAME} Bot started successfully...")
         app_bot.run_polling()
     except Exception as e:
         logger.error(f"Telegram Bot error: {e}")
