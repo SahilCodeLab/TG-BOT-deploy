@@ -1,5 +1,5 @@
 """
-SahilCodeLab Final Tension Relief & Casual Chat Bot - Flask + Telegram Bot
+SahilCodeLab Final Tension Relief & Casual Chat Bot - Koyeb Optimized
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
 """
@@ -9,7 +9,6 @@ import sys
 import logging
 import sqlite3
 from datetime import datetime
-from threading import Thread
 from flask import Flask, jsonify
 import google.generativeai as genai
 from groq import Groq
@@ -47,7 +46,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. DATABASE SETUP (Users & Chat Logs Store Feature)
+# 2. DATABASE SETUP
 # ============================================================
 
 class Database:
@@ -58,14 +57,12 @@ class Database:
     def init_tables(self):
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             c = conn.cursor()
-            # Users table
             c.execute('''CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 name TEXT,
                 joined_date TIMESTAMP
             )''')
-            # Chat history store table
             c.execute('''CREATE TABLE IF NOT EXISTS chat_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
@@ -96,7 +93,7 @@ class Database:
 db = Database()
 
 # ============================================================
-# 3. PURE TENSION RELIEF & CASUAL AI ENGINE
+# 3. AI ENGINE
 # ============================================================
 
 class AIEngine:
@@ -223,13 +220,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_chat.send_action("typing")
     reply = AIEngine.get_response(user_msg, user_name=user.first_name, mood=current_mood)
 
-    # Store chat history in database securely
     db.store_chat(user.id, user_msg, reply)
-
     await update.effective_message.reply_text(reply)
 
 # ============================================================
-# 5. FLASK SERVER SETUP
+# 5. FLASK SERVER SETUP (Health Check for Koyeb)
 # ============================================================
 
 app = Flask(__name__)
@@ -242,25 +237,19 @@ def home():
 def health():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
-def run_telegram_bot():
-    try:
-        app_bot = Application.builder().token(BOT_TOKEN).build()
-
-        app_bot.add_handler(CommandHandler("start", start_command))
-        app_bot.add_handler(CallbackQueryHandler(button_handler))
-        app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-        logger.info("✨ Tension Relief & Casual Buddy Bot started successfully...")
-        app_bot.run_polling()
-    except Exception as e:
-        logger.error(f"Telegram Bot error: {e}")
-
 # ============================================================
-# 6. MAIN EXECUTION
+# 6. MAIN EXECUTION (Direct Telegram Polling for Koyeb)
 # ============================================================
 
 if __name__ == '__main__':
-    bot_thread = Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
+    # Build Telegram Application
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    app.run(host="0.0.0.0", port=PORT)
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    logger.info("✨ Zoya Bot started successfully on Koyeb...")
+    
+    # Run polling directly (Koyeb handles web service health via port binding)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
