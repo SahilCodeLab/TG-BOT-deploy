@@ -1,5 +1,5 @@
 """
-SahilCodeLab Pure AI Chatbot - Original DB Structure & 2-Moods (English/Hinglish)
+SahilCodeLab Pure AI Chatbot - Flask + Telegram Bot (Original DB Schema)
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 Contact Email: sahil.dev@gmail.com
 """
@@ -10,8 +10,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from threading import Thread
-from fastapi import FastAPI
-import uvicorn
+from flask import Flask, jsonify
 import google.generativeai as genai
 from groq import Groq
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -226,18 +225,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(reply)
 
 # ============================================================
-# 5. FASTAPI SERVER
+# 5. FLASK SERVER SETUP
 # ============================================================
 
-app = FastAPI(title=f"{BRAND_NAME} 2-Mood Chat API", version="5.2")
+app = Flask(__name__)
 
-@app.get("/")
+@app.route("/")
 def home():
-    return {"brand": BRAND_NAME, "developer": FOUNDER_NAME, "status": "Online"}
+    return jsonify({"brand": BRAND_NAME, "developer": FOUNDER_NAME, "status": "Online"})
 
-@app.get("/health")
+@app.route("/health")
 def health():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
 def run_telegram_bot():
     try:
@@ -247,7 +246,7 @@ def run_telegram_bot():
         app_bot.add_handler(CallbackQueryHandler(button_handler))
         app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        logger.info(f"✅ {BRAND_NAME} Bot started successfully...")
+        logger.info(f"✅ {BRAND_NAME} Bot started successfully with Flask...")
         app_bot.run_polling()
     except Exception as e:
         logger.error(f"Telegram Bot error: {e}")
@@ -257,7 +256,9 @@ def run_telegram_bot():
 # ============================================================
 
 if __name__ == '__main__':
+    # Start Telegram bot in a background thread
     bot_thread = Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
 
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    # Run Flask server on the main thread
+    app.run(host="0.0.0.0", port=PORT)
