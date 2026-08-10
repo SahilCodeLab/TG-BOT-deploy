@@ -1,6 +1,6 @@
 """
-Zoya & Kabir Telegram Bot - Persona, Empathy & Google Sheets Memory Enabled
-Developer Identity: SahilCodeLab
+Zoya & Kabir Telegram Bot - Database Fixed & Clean State Management
+Developer: SahilCodeLab
 """
 
 import os
@@ -8,7 +8,6 @@ import sys
 import logging
 import sqlite3
 import json
-import time
 import re
 import requests
 from datetime import datetime
@@ -38,7 +37,7 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
 
 if not BOT_TOKEN:
-    print("❌ ERROR: BOT_TOKEN is missing in environment variables!", flush=True)
+    print("❌ ERROR: BOT_TOKEN missing!", flush=True)
     sys.exit(1)
 
 if GEMINI_API_KEY:
@@ -53,7 +52,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. DATABASE MANAGER
+# 2. FIXED DATABASE MANAGER (PERSISTENT GENDER & HISTORY)
 # ============================================================
 class Database:
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -64,11 +63,13 @@ class Database:
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
+                # Added 'gender' column to persist user choice
                 c.execute('''CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     name TEXT,
                     joined_date TIMESTAMP,
+                    gender TEXT DEFAULT 'girl',
                     total_interactions INTEGER DEFAULT 0
                 )''')
                 c.execute('''CREATE TABLE IF NOT EXISTS chat_history (
@@ -83,15 +84,42 @@ class Database:
         except Exception as e:
             logger.error(f"Database Init Error: {e}")
 
-    def save_user(self, user_id: int, username: str, name: str):
+    def save_user(self, user_id: int, username: str, name: str, gender: str = "girl"):
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
-                c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, 0)", 
-                          (user_id, username, name, datetime.now().isoformat()))
+                c.execute("""
+                    INSERT INTO users (user_id, username, name, joined_date, gender)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                    username=excluded.username,
+                    name=excluded.name
+                """, (user_id, username, name, datetime.now().isoformat(), gender))
                 conn.commit()
         except Exception as e:
             logger.error(f"Save User Error: {e}")
+
+    def set_user_gender(self, user_id: int, gender: str):
+        try:
+            with sqlite3.connect(self.db_path, timeout=30) as conn:
+                c = conn.cursor()
+                c.execute("UPDATE users SET gender = ? WHERE user_id = ?", (gender, user_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Set Gender Error: {e}")
+
+    def get_user_gender(self, user_id: int) -> str:
+        try:
+            with sqlite3.connect(self.db_path, timeout=30) as conn:
+                c = conn.cursor()
+                c.execute("SELECT gender FROM users WHERE user_id = ?", (user_id,))
+                row = c.fetchone()
+                if row and row[0]:
+                    return row[0]
+                return "girl"
+        except Exception as e:
+            logger.error(f"Get Gender Error: {e}")
+            return "girl"
 
     def store_chat(self, user_id: int, user_msg: str, bot_resp: str):
         try:
@@ -104,7 +132,7 @@ class Database:
         except Exception as e:
             logger.error(f"Store Chat Error: {e}")
 
-    def get_chat_history(self, user_id: int, limit: int = 6) -> list:
+    def get_chat_history(self, user_id: int, limit: int = 4) -> list:
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
@@ -119,7 +147,7 @@ class Database:
                     if bot_resp: history.append({"role": "assistant", "content": bot_resp})
                 return history
         except Exception as e:
-            logger.error(f"Error fetching SQLite history: {e}")
+            logger.error(f"Error fetching history: {e}")
             return []
 
     def clear_user_history(self, user_id: int):
@@ -134,7 +162,7 @@ class Database:
 db = Database()
 
 # ============================================================
-# 3. GOOGLE SHEETS LOGGER & MEMORY FETCHER (Col L & M)
+# 3. GOOGLE SHEETS LOGGER (Col L & M)
 # ============================================================
 class GoogleSheetsLogger:
     def __init__(self):
@@ -159,28 +187,11 @@ class GoogleSheetsLogger:
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
             self.client = gspread.authorize(creds)
             self.sheet = self.client.open_by_key(self.spreadsheet_id)
-            self._ensure_chat_sheet()
             self.initialized = True
-            logger.info("✅ Google Sheets Memory System Ready")
+            logger.info("✅ Google Sheets Ready")
         except Exception as e:
             logger.error(f"❌ Google Sheets init failed: {e}")
             self.enabled = False
-
-    def _ensure_chat_sheet(self):
-        try:
-            existing = [ws.title for ws in self.sheet.worksheets()]
-            if self.sheet_name not in existing:
-                ws = self.sheet.add_worksheet(title=self.sheet_name, rows=100000, cols=15)
-                headers = [
-                    "S.No", "Date", "Time", "Timestamp", "User ID",
-                    "Username", "Full Name", "Message Count",
-                    "Message Type", "User Message", "Bot Reply",
-                    "User chat memory stored", "user id"
-                ]
-                ws.append_row(headers)
-                ws.freeze(rows=1)
-        except Exception as e:
-            logger.error(f"Error creating chat sheet: {e}")
 
     def fetch_user_sheet_memory(self, user_id: int) -> str:
         if not self.enabled or not self.initialized:
@@ -200,8 +211,8 @@ class GoogleSheetsLogger:
                         memories.append(mem_text)
             
             if memories:
-                recent_memories = list(dict.fromkeys(memories))[-3:]
-                return " | ".join(recent_memories)
+                recent = list(dict.fromkeys(memories))[-2:]
+                return " | ".join(recent)
             return ""
         except Exception as e:
             logger.error(f"Error fetching sheet memory: {e}")
@@ -238,137 +249,97 @@ class GoogleSheetsLogger:
             ws.append_row(row_data, value_input_option='USER_ENTERED')
             return True
         except Exception as e:
-            logger.error(f"❌ Google Sheets log failed: {e}")
+            logger.error(f"Google Sheets log failed: {e}")
             return False
 
 google_sheets = GoogleSheetsLogger()
 
 # ============================================================
-# 4. WEATHER SERVICE
-# ============================================================
-class WeatherService:
-    @staticmethod
-    def extract_city(text: str) -> str:
-        text_clean = re.sub(r'[^\w\s]', '', text.lower())
-        stop_words = {"weather", "mausam", "kaisa", "hai", "batao", "bata", "kya", "aaj", "in", "ka", "ki", "ko", "me", "main", "par", "today", "now"}
-        words = text_clean.split()
-        filtered = [w for w in words if w not in stop_words]
-        return " ".join(filtered).title() if filtered else ""
-
-    @classmethod
-    def get_weather(cls, user_msg: str) -> str:
-        if not WEATHER_API_KEY: return ""
-        city_name = cls.extract_city(user_msg)
-        if not city_name: return ""
-
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={WEATHER_API_KEY}&units=metric"
-        try:
-            res = requests.get(url, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                return f"LIVE WEATHER: {data['name']}: {round(data['main']['temp'])}°C, {data['weather'][0]['description'].title()}."
-            return ""
-        except Exception:
-            return ""
-
-# ============================================================
-# 5. AI ENGINE (Gemini 1st Priority + Strict Persona & Memory)
+# 4. AI ENGINE (STRICT REALISTIC PERSONA)
 # ============================================================
 class AIEngine:
     @staticmethod
-    def get_response(user_message: str, user_id: int, user_name: str = "Friend", gender: str = "girl", weather_context: str = "") -> str:
-        # Fetch Memory from Google Sheets
+    def get_response(user_message: str, user_id: int, user_name: str = "Friend", gender: str = "girl") -> str:
         sheet_memory = google_sheets.fetch_user_sheet_memory(user_id)
         
-        # Gender Specific Strict Rules
         if gender == "girl":
-            persona_instructions = """
-You are ZOYA, a caring, empathetic, and sweet female best friend chatting on Telegram.
-STRICT FEMALE HINDI GRAMMAR RULES:
-- Use STRICTLY female words for yourself: 'main karti hoon', 'soch rahi hoon', 'aa rahi hoon', 'samajh sakti hoon', 'pilaungi', 'sun rahi hoon'.
-- NEVER EVER use male words for yourself like 'kar sakta hoon', 'aaya tha', 'pilaunga', 'bhai'.
-- Tone: Emotional, gentle, warm, human-like.
+            gender_rules = """
+YOUR NAME: ZOYA (Female Best Friend)
+STRICT GRAMMAR RULES:
+- Talk like a normal young Indian girl on WhatsApp/Telegram.
+- Use ONLY female self-referencing Hindi words: 'main theek hoon', 'soch rahi thi', 'aa gayi', 'karti hoon', 'sun rahi hoon', 'batao na'.
+- NEVER use male words for yourself like 'sunta hoon', 'karta hoon', 'aaya tha', 'bhai'.
 """
         else:
-            persona_instructions = """
-You are KABIR, a cool, supportive, and grounded male best friend chatting on Telegram.
-STRICT MALE HINDI GRAMMAR RULES:
-- Use STRICTLY male words for yourself: 'main karta hoon', 'soch raha hoon', 'samajh sakta hoon', 'pilaunga', 'bro', 'bhai'.
-- Tone: Casual, supportive, relatable.
+            gender_rules = """
+YOUR NAME: KABIR (Male Best Friend)
+STRICT GRAMMAR RULES:
+- Talk like a normal close guy friend/bro.
+- Use male self-referencing Hindi words: 'main theek hoon', 'soch raha tha', 'karta hoon', 'bro', 'bhai', 'sun raha hoon'.
 """
 
-        system_instruction = f"""{persona_instructions}
+        system_instruction = f"""{gender_rules}
 
 CONTEXT & MEMORY:
 - User Name: {user_name}
-- Past Memories (Jo is user ne pehle bataya tha): {sheet_memory if sheet_memory else 'Kuch khas nahi'}
+- Past Memory: {sheet_memory if sheet_memory else 'None'}
 
-CRITICAL HUMAN CHAT RULES:
-1. EMPATHY FIRST: Match the user's emotion carefully. If the user is sad, depressed, or crying ("sad hu", "roo raha", "pareshan hu"), BE COMPASSIONATE AND CARING. Never talk about random activities like watching TV, playing games, or making weird jokes when someone is crying.
-2. NO ILLOGICAL LINES: Never make illogical statements like "coffee khana" (it's peena) or random non-sensical things. Talk like a real smart human.
-3. NO TIME/DATE SPAM: Don't mention current time, date, or year unless the user explicitly asks.
-4. SHORT & REALISTIC: Keep replies short (1 to 3 natural sentences) in conversational Hinglish.
+STRICT HUMAN CHAT RULES:
+1. VERY SHORT REPLIES: Keep replies under 10-25 words. Speak casually like a real person sending a quick text!
+2. NO WEIRD PHILOSOPHY / NO HALLUCINATIONS: Do NOT make up stories (like 'coffee khana', 'TV dekhna', 'kuch dinon baad aayi hai'). Answer directly to what the user said!
+3. EMPATHY MATCHING: If the user says they are sad or crying, be genuinely supportive ("Kya hua yaar? Sab theek hai? Mujhse share kar.").
+4. NO DATES/TIME: Never mention system dates/time.
 """
 
-        if weather_context:
-            system_instruction += f"\nLive Weather Info: {weather_context}\n"
-
-        # GEMINI API IMPLEMENTATION (1ST PRIORITY)
+        # GEMINI API (FIRST PRIORITY)
         if GEMINI_API_KEY:
             try:
-                history_data = db.get_chat_history(user_id, limit=6)
-                
+                history_data = db.get_chat_history(user_id, limit=4)
                 gemini_history = []
                 for msg in history_data:
                     role = "user" if msg["role"] == "user" else "model"
-                    gemini_history.append({
-                        "role": role,
-                        "parts": [msg["content"]]
-                    })
+                    gemini_history.append({"role": role, "parts": [msg["content"]]})
 
                 model = genai.GenerativeModel(
                     model_name='gemini-1.5-flash',
-                    system_instruction=system_instruction
+                    system_instruction=system_instruction,
+                    generation_config={"temperature": 0.4, "max_output_tokens": 80}
                 )
                 
                 chat = model.start_chat(history=gemini_history)
                 response = chat.send_message(user_message)
                 return response.text.strip()
-
             except Exception as e:
-                logger.error(f"Gemini API Error, falling back to Groq: {e}")
+                logger.error(f"Gemini API Error: {e}")
 
         # GROQ FALLBACK
         if groq_client:
             try:
                 messages = [{"role": "system", "content": system_instruction}]
-                messages.extend(db.get_chat_history(user_id, limit=6))
+                messages.extend(db.get_chat_history(user_id, limit=4))
                 messages.append({"role": "user", "content": user_message})
 
                 resp = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=messages,
-                    temperature=0.6,
-                    max_tokens=200
+                    temperature=0.4,
+                    max_tokens=80
                 )
                 return resp.choices[0].message.content.strip()
             except Exception as e:
                 logger.error(f"Groq API Error: {e}")
 
-        return "Arre yaar, mera network thoda slow ho gaya hai... ek baar fir se bolna?"
+        return "Arre thoda network slow hai, ek baar firse bolna?"
 
 # ============================================================
-# 6. TELEGRAM HANDLERS & PERSONA SELECTION
+# 5. TELEGRAM HANDLERS
 # ============================================================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.effective_user
         db.save_user(user.id, user.username, user.first_name)
         
-        if 'gender' not in context.user_data:
-            context.user_data['gender'] = 'girl'
-
-        current_gender = context.user_data['gender']
+        current_gender = db.get_user_gender(user.id)
         bot_name = "👧 Zoya (Female Friend)" if current_gender == 'girl' else "👦 Kabir (Male Friend)"
 
         keyboard = [
@@ -376,14 +347,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("👧 Zoya (Girl)", callback_data="setgender_girl"),
                 InlineKeyboardButton("👦 Kabir (Boy)", callback_data="setgender_boy")
             ],
-            [InlineKeyboardButton("💬 Fresh Chat", callback_data="fresh_chat")]
+            [InlineKeyboardButton("💬 Reset Memory & Chat", callback_data="fresh_chat")]
         ]
 
         welcome_msg = (
             f"Hey **{user.first_name}**! ☕✨\n\n"
-            f"Abhi main **{bot_name}** mood me hoon.\n"
-            "Aap choose kar sakte hain ki **Zoya (Girl)** se baat karni hai ya **Kabir (Boy)** se!\n\n"
-            "Sab theek chal raha hai na? Batao kya baat hai."
+            f"Abhi main **{bot_name}** mode me hoon.\n"
+            "Choose kar lo kisse baat karni hai!"
         )
 
         if update.message:
@@ -393,6 +363,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Start Command Error: {e}")
 
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    db.clear_user_history(user.id)
+    await update.message.reply_text("🧹 Database se saari purani kharab chat history saaf kar di gayi hai! Ab bilkul fresh baat hogi.")
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -400,16 +375,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if query.data.startswith("setgender_"):
             new_gender = query.data.split("_")[1]
-            context.user_data['gender'] = new_gender
+            db.set_user_gender(query.from_user.id, new_gender)
             name = "👧 Zoya" if new_gender == "girl" else "👦 Kabir"
             
             keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_home")]]
-            await query.message.edit_text(f"✨ Done! Ab se tum **{name}** se baat kar rahe ho.", reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.message.edit_text(f"✨ Done! Ab main **{name}** bankar baat karungi/karunga.", reply_markup=InlineKeyboardMarkup(keyboard))
 
         elif query.data == "fresh_chat":
             db.clear_user_history(query.from_user.id)
             keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_home")]]
-            await query.message.edit_text("🔄 Purani memory clear! Naye sirre se baat karte hain.", reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.message.edit_text("🔄 Purani memory database se clear kar di hai!", reply_markup=InlineKeyboardMarkup(keyboard))
 
         elif query.data == "menu_home":
             await query.message.delete()
@@ -424,31 +399,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         user = update.effective_user
         user_msg = update.effective_message.text
-
-        if 'gender' not in context.user_data:
-            context.user_data['gender'] = 'girl'
-        gender = context.user_data['gender']
+        gender = db.get_user_gender(user.id)
 
         await update.effective_chat.send_action("typing")
-        
-        weather_info = ""
-        if any(w in user_msg.lower() for w in ["weather", "mausam", "temperature", "temp", "barish", "rain"]):
-            weather_info = WeatherService.get_weather(user_msg)
 
         reply = AIEngine.get_response(
             user_msg, 
             user_id=user.id,
             user_name=user.first_name, 
-            gender=gender,
-            weather_context=weather_info
+            gender=gender
         )
 
-        # Store in Google Sheets Background Log
         if google_sheets.enabled and google_sheets.initialized:
             try:
                 google_sheets.log_chat_store_first(update=update, bot_reply=reply, memory_note=user_msg)
             except Exception as e:
-                logger.error(f"Google Sheets log error: {e}")
+                logger.error(f"Sheets error: {e}")
 
         db.store_chat(user.id, user_msg, reply)
         await update.effective_message.reply_text(reply)
@@ -457,7 +423,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Handle Message Error: {e}")
 
 # ============================================================
-# 7. FLASK HEALTH CHECK & SERVER ENTRY POINT
+# 6. FLASK SERVER & BOT RUNNER
 # ============================================================
 app = Flask(__name__)
 
@@ -470,8 +436,9 @@ if __name__ == '__main__':
 
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("reset", reset_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("✨ Bot Started Successfully...")
+    logger.info("✨ Bot Started...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
