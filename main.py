@@ -46,7 +46,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. LOCAL SQLITE DATABASE (FAST CACHE & HISTORY)
+# 2. LOCAL SQLITE DATABASE (PERSISTENT USER CHOICE & CHAT CACHE)
 # ============================================================
 class Database:
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -167,9 +167,9 @@ class GoogleSheets3TabManager:
             client = gspread.authorize(creds)
             self.sheet = client.open_by_key(self.spreadsheet_id)
             self.initialized = True
-            logger.info("✅ Google Sheets 3-Tab Connected Successfully")
+            print("✅ Google Sheets 3-Tab System Connected Successfully!", flush=True)
         except Exception as e:
-            logger.error(f"❌ Google Sheets Connection Failed: {e}")
+            print(f"❌ Google Sheets Connection Failed: {e}", flush=True)
             self.enabled = False
 
     def fetch_longterm_memories(self, user_id: int) -> str:
@@ -190,12 +190,15 @@ class GoogleSheets3TabManager:
             
             return " | ".join(facts) if facts else ""
         except Exception as e:
-            logger.error(f"Error fetching Longterm_Memory tab: {e}")
+            print(f"⚠️ Error reading Longterm_Memory: {e}", flush=True)
             return ""
 
     def sync_user_data(self, update: Update, bot_reply: str, emotion: str = "Neutral", fact_extracted: str = ""):
-        """Teeno Tabs mein Sync Update karta hai"""
-        if not self.enabled or not self.initialized: return
+        """Teeno Tabs mein Real-time Data Sync karta hai with Detailed Debug Logs"""
+        if not self.enabled or not self.initialized: 
+            print("⚠️ Google Sheets disabled ya initialized nahi hai!", flush=True)
+            return
+        
         try:
             user = update.effective_user
             msg = update.effective_message
@@ -208,66 +211,77 @@ class GoogleSheets3TabManager:
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             # --- TAB 1: User_Chats ---
-            ws_chats = self.sheet.worksheet("User_Chats")
-            chat_row = [
-                str_user_id,
-                full_name,
-                username,
-                (msg.text or '')[:1000],
-                (bot_reply or '')[:1000],
-                active_persona,
-                now_str,
-                emotion,
-                fact_extracted
-            ]
-            ws_chats.append_row(chat_row, value_input_option='USER_ENTERED')
-
-            # --- TAB 2: Longterm_Memory (Agar koi naya fact extracted hua ho) ---
-            if fact_extracted.strip():
-                ws_mem = self.sheet.worksheet("Longterm_Memory")
-                mem_id = len(ws_mem.col_values(1))
-                mem_row = [
-                    mem_id,
-                    str_user_id,
-                    "General Fact",
-                    fact_extracted,
-                    "High",
-                    datetime.now().strftime("%Y-%m-%d")
-                ]
-                ws_mem.append_row(mem_row, value_input_option='USER_ENTERED')
-
-            # --- TAB 3: User_Profiles (User ki Status Row upsert) ---
-            ws_prof = self.sheet.worksheet("User_Profiles")
-            user_ids = ws_prof.col_values(1)
-            
-            if str_user_id in user_ids:
-                row_idx = user_ids.index(str_user_id) + 1
-                # Update Active Persona, Mood, Last Active
-                ws_prof.update_cell(row_idx, 4, active_persona)
-                ws_prof.update_cell(row_idx, 5, emotion)
-                ws_prof.update_cell(row_idx, 8, now_str)
-            else:
-                # Add New Profile
-                prof_row = [
+            try:
+                ws_chats = self.sheet.worksheet("User_Chats")
+                chat_row = [
                     str_user_id,
                     full_name,
                     username,
+                    (msg.text or '')[:1000],
+                    (bot_reply or '')[:1000],
                     active_persona,
+                    now_str,
                     emotion,
-                    "", # City/Location
-                    now_str, # First Seen
-                    now_str, # Last Active
-                    1 # Total Messages
+                    fact_extracted
                 ]
-                ws_prof.append_row(prof_row, value_input_option='USER_ENTERED')
+                ws_chats.append_row(chat_row, value_input_option='USER_ENTERED')
+                print(f"✅ [User_Chats] Data added for {full_name}", flush=True)
+            except Exception as e:
+                print(f"❌ [User_Chats Write Error]: {e} (Tab name check karo)", flush=True)
+
+            # --- TAB 2: Longterm_Memory (Agar naya fact extracted ho) ---
+            if fact_extracted.strip():
+                try:
+                    ws_mem = self.sheet.worksheet("Longterm_Memory")
+                    mem_id = len(ws_mem.col_values(1))
+                    mem_row = [
+                        mem_id,
+                        str_user_id,
+                        "General Fact",
+                        fact_extracted,
+                        "High",
+                        datetime.now().strftime("%Y-%m-%d")
+                    ]
+                    ws_mem.append_row(mem_row, value_input_option='USER_ENTERED')
+                    print(f"🧠 [Longterm_Memory] Fact added for {str_user_id}", flush=True)
+                except Exception as e:
+                    print(f"❌ [Longterm_Memory Write Error]: {e}", flush=True)
+
+            # --- TAB 3: User_Profiles (Upsert Status & Persona) ---
+            try:
+                ws_prof = self.sheet.worksheet("User_Profiles")
+                user_ids = ws_prof.col_values(1)
+                
+                if str_user_id in user_ids:
+                    row_idx = user_ids.index(str_user_id) + 1
+                    ws_prof.update_cell(row_idx, 4, active_persona)
+                    ws_prof.update_cell(row_idx, 5, emotion)
+                    ws_prof.update_cell(row_idx, 8, now_str)
+                    print(f"👤 [User_Profiles] Profile updated for {str_user_id}", flush=True)
+                else:
+                    prof_row = [
+                        str_user_id,
+                        full_name,
+                        username,
+                        active_persona,
+                        emotion,
+                        "",       # City/Location
+                        now_str,  # First Seen
+                        now_str,  # Last Active
+                        1         # Total Messages
+                    ]
+                    ws_prof.append_row(prof_row, value_input_option='USER_ENTERED')
+                    print(f"👤 [User_Profiles] New Profile Created for {str_user_id}", flush=True)
+            except Exception as e:
+                print(f"❌ [User_Profiles Write Error]: {e}", flush=True)
 
         except Exception as e:
-            logger.error(f"Error syncing to 3-Tab Google Sheets: {e}")
+            print(f"❌ Global Sync Error: {e}", flush=True)
 
 sheets = GoogleSheets3TabManager()
 
 # ============================================================
-# 4. REALISTIC AI ENGINE
+# 4. REALISTIC HUMAN AI ENGINE
 # ============================================================
 class AIEngine:
     @staticmethod
@@ -300,6 +314,7 @@ STRICT HUMAN TELEGRAM CHAT RULES:
 3. EMPATHY: If user seems sad, be genuinely caring.
 """
 
+        # GEMINI API (FIRST PRIORITY)
         if GEMINI_API_KEY:
             try:
                 history = db.get_chat_history(user_id, limit=4)
@@ -316,6 +331,7 @@ STRICT HUMAN TELEGRAM CHAT RULES:
             except Exception as e:
                 logger.error(f"Gemini Error: {e}")
 
+        # GROQ FALLBACK
         if groq_client:
             try:
                 msgs = [{"role": "system", "content": system_instruction}]
@@ -332,7 +348,7 @@ STRICT HUMAN TELEGRAM CHAT RULES:
         return "Arre thoda network slow hai, ek baar firse bolna?", "Error"
 
 # ============================================================
-# 5. TELEGRAM HANDLERS
+# 5. TELEGRAM BOT HANDLERS
 # ============================================================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -357,7 +373,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.clear_user_history(update.effective_user.id)
-    await update.message.reply_text("🧹 Database se purani kharab chat history saaf kar di gayi hai!")
+    await update.message.reply_text("🧹 Local database se saari purani chat history saaf kar di gayi hai!")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -370,7 +386,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(f"✨ Done! Ab se main **{name}** bankar baat karungi/karunga.")
     elif query.data == "fresh_chat":
         db.clear_user_history(query.from_user.id)
-        await query.message.edit_text("🔄 Local memory clear kar di gayi hai!")
+        await query.message.edit_text("🔄 Purani memory clear kar di hai!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_message.text: return
@@ -383,7 +399,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply, model_used = AIEngine.get_response(user_msg, user.id, user.first_name, gender)
 
-    # SQLite Store
+    # Local SQLite Cache Store
     db.store_chat(user.id, user_msg, reply)
 
     # Background Thread for Sheets Sync (Ensures Fast Telegram Response)
@@ -398,7 +414,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return jsonify({"bot": "Zoya/Kabir", "sheets_system": "3-Tab Active", "status": "Online"})
+    return jsonify({"brand": "SahilCodeLab", "bot": "Zoya/Kabir", "sheets_system": "3-Tab Active", "status": "Online"})
 
 if __name__ == '__main__':
     Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False), daemon=True).start()
@@ -409,5 +425,5 @@ if __name__ == '__main__':
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("✨ Bot Started with 3-Tab Google Sheets Integration...")
+    print("✨ Bot Starting with 3-Tab Google Sheets Architecture...", flush=True)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
