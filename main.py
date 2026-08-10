@@ -1,12 +1,21 @@
 """
 Zoya Bot - Tension Relief & Casual Companion (Verified & Fault-Tolerant)
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
+
+Features:
+- Google Sheets real-time logging (Store-First)
+- SQLite backup
+- Multi-language support (Hinglish/English)
+- Interactive inline buttons
+- Production-grade error handling
 """
 
 import os
 import sys
 import logging
 import sqlite3
+import json
+import time
 from datetime import datetime
 from threading import Thread
 from flask import Flask, jsonify
@@ -28,20 +37,255 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "sahilcodelab.db")
 PORT = int(os.getenv("PORT", 8000))
 
+# Google Sheets Configuration
+ENABLE_GOOGLE_SHEETS = os.getenv("ENABLE_GOOGLE_SHEETS", "false").lower() == "true"
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
+GOOGLE_SHEETS_RETRY = int(os.getenv("GOOGLE_SHEETS_RETRY", 3))
+
 if not BOT_TOKEN:
     print("❌ ERROR: BOT_TOKEN is missing in environment variables!", flush=True)
     sys.exit(1)
 
+# Configure AI APIs
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 if GROQ_API_KEY:
     groq_client = Groq(api_key=GROQ_API_KEY)
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. BULLETPROOF DATABASE MANAGER
+# 2. GOOGLE SHEETS LOGGER (Store-First)
+# ============================================================
+
+class GoogleSheetsLogger:
+    """Real-time Google Sheets logger with store-first architecture"""
+    
+    def __init__(self):
+        self.enabled = ENABLE_GOOGLE_SHEETS
+        self.spreadsheet_id = SPREADSHEET_ID
+        self.credentials = GOOGLE_SHEETS_CREDENTIALS
+        self.sheet_name = "Chats"
+        self.client = None
+        self.sheet = None
+        self.initialized = False
+        self._serial_cache = None
+
+        if self.enabled and self.spreadsheet_id and self.credentials:
+            self._initialize_client()
+
+    def _initialize_client(self):
+        """Initialize Google Sheets client"""
+        try:
+            import gspread
+            from oauth2client.service_account import ServiceAccountCredentials
+            
+            scope = [
+                'https://spreadsheets.google.com/feeds',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            
+            creds_dict = json.loads(self.credentials)
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            self.client = gspread.authorize(creds)
+            self.sheet = self.client.open_by_key(self.spreadsheet_id)
+            
+            self._ensure_chat_sheet()
+            self._refresh_serial_cache()
+            
+            self.initialized = True
+            self.enabled = True
+            logger.info("✅ Google Sheets logging enabled for Zoya Bot")
+            
+        except Exception as e:
+            logger.error(f"❌ Google Sheets init failed: {e}")
+            self.enabled = False
+            self.initialized = False
+
+    def _ensure_chat_sheet(self):
+        """Create Chats worksheet with headers if missing"""
+        try:
+            existing = [ws.title for ws in self.sheet.worksheets()]
+            
+            if self.sheet_name not in existing:
+                ws = self.sheet.add_worksheet(title=self.sheet_name, rows=100000, cols=11)
+                headers = [
+                    "S.No", "Date", "Time", "Timestamp",
+                    "User ID", "Username", "Full Name",
+                    "Message Count", "Message Type",
+                    "User Message", "Bot Reply"
+                ]
+                for col_idx, header in enumerate(headers, start=1):
+                    ws.update_cell(1, col_idx, header)
+                ws.freeze(rows=1)
+                logger.info(f"📊 Created '{self.sheet_name}' worksheet")
+        except Exception as e:
+            logger.error(f"Error creating chat sheet: {e}")
+
+    def _refresh_serial_cache(self):
+        """Refresh cached serial number"""
+        try:
+            ws = self.sheet.worksheet(self.sheet_name)
+            total_rows = ws.row_count
+            if total_rows <= 1:
+                self._serial_cache = 1
+            else:
+                last_row = ws.row_values(total_rows)
+                if last_row and last_row[0] and str(last_row[0]).isdigit():
+                    self._serial_cache = int(last_row[0]) + 1
+                else:
+                    self._serial_cache = total_rows - 1
+        except Exception as e:
+            logger.error(f"Error refreshing serial cache: {e}")
+            self._serial_cache = 1
+
+    def _get_next_serial(self, ws) -> int:
+        """Get next serial number using cache"""
+        if self._serial_cache is None:
+            self._refresh_serial_cache()
+        
+        self._serial_cache += 1
+        return self._serial_cache
+
+    def _get_message_type(self, update: Update) -> str:
+        """Detect message type"""
+        message = update.effective_message
+        if not message:
+            return "Unknown"
+        
+        if message.text:
+            return "Text"
+        elif message.photo:
+            return "Photo"
+        elif message.video:
+            return "Video"
+        elif message.voice:
+            return "Voice"
+        elif message.audio:
+            return "Audio"
+        elif message.sticker:
+            return "Sticker"
+        elif message.animation:
+            return "GIF"
+        elif message.document:
+            return "Document"
+        elif message.location:
+            return "Location"
+        elif message.contact:
+            return "Contact"
+        else:
+            return "Unknown"
+
+    def _get_user_message_text(self, update: Update) -> str:
+        """Extract user message text"""
+        message = update.effective_message
+        if not message:
+            return ""
+        
+        if message.text:
+            return message.text
+        elif message.caption:
+            return message.caption
+        elif message.photo:
+            return "📸 Photo"
+        elif message.video:
+            return "🎬 Video"
+        elif message.voice:
+            return "🎤 Voice Message"
+        elif message.sticker:
+            return "🎨 Sticker"
+        else:
+            return "📨 Media Message"
+
+    def _get_full_name(self, user) -> str:
+        """Get full name from user"""
+        if not user:
+            return "No Name"
+        
+        first_name = user.first_name or ''
+        last_name = user.last_name or ''
+        full_name = f"{first_name} {last_name}".strip()
+        
+        if full_name:
+            return full_name
+        elif user.username:
+            return user.username
+        else:
+            return "No Name"
+
+    def log_chat_store_first(self, update: Update, bot_reply: str) -> bool:
+        """
+        Log chat to Google Sheets (Store-First)
+        Saves before sending reply to user
+        """
+        if not self.enabled or not self.initialized:
+            return False
+        
+        try:
+            user = update.effective_user
+            message = update.effective_message
+            
+            if not user or not message:
+                return False
+            
+            ws = self.sheet.worksheet(self.sheet_name)
+            
+            # Get data
+            now = datetime.now()
+            serial_no = self._get_next_serial(ws)
+            
+            # Get message count from database
+            message_count = 0
+            try:
+                db = Database()
+                user_data = db.get_user(user.id)
+                if user_data:
+                    message_count = user_data.get('total_interactions', 0)
+            except:
+                pass
+            
+            # Prepare row
+            row_data = [
+                serial_no,
+                now.strftime("%Y-%m-%d"),
+                now.strftime("%H:%M:%S"),
+                now.isoformat(),
+                str(user.id),
+                user.username or 'No Username',
+                self._get_full_name(user),
+                message_count,
+                self._get_message_type(update),
+                self._get_user_message_text(update),
+                bot_reply or ''
+            ]
+            
+            # Append with retry
+            for attempt in range(GOOGLE_SHEETS_RETRY):
+                try:
+                    ws.append_row(row_data, value_input_option='USER_ENTERED')
+                    logger.debug(f"📊 Google Sheets log: User {user.id}, Serial #{serial_no}")
+                    return True
+                except Exception as e:
+                    if attempt == GOOGLE_SHEETS_RETRY - 1:
+                        raise
+                    time.sleep(2 ** attempt)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Google Sheets log failed: {e}")
+            return False
+
+# Initialize Google Sheets logger
+google_sheets = GoogleSheetsLogger()
+
+# ============================================================
+# 3. BULLETPROOF DATABASE MANAGER
 # ============================================================
 
 class Database:
@@ -57,7 +301,8 @@ class Database:
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     name TEXT,
-                    joined_date TIMESTAMP
+                    joined_date TIMESTAMP,
+                    total_interactions INTEGER DEFAULT 0
                 )''')
                 c.execute('''CREATE TABLE IF NOT EXISTS chat_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +327,25 @@ class Database:
         except Exception as e:
             logger.error(f"Save User Error: {e}")
 
+    def get_user(self, user_id: int):
+        try:
+            with sqlite3.connect(self.db_path, timeout=30) as conn:
+                c = conn.cursor()
+                c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+                row = c.fetchone()
+                if row:
+                    return {
+                        'user_id': row[0],
+                        'username': row[1],
+                        'name': row[2],
+                        'joined_date': row[3],
+                        'total_interactions': row[4]
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Get User Error: {e}")
+            return None
+
     def store_chat(self, user_id: int, user_msg: str, bot_resp: str):
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
@@ -90,6 +354,10 @@ class Database:
                     INSERT INTO chat_history (user_id, user_message, bot_response, timestamp)
                     VALUES (?, ?, ?, ?)
                 """, (user_id, user_msg, bot_resp, datetime.now().isoformat()))
+                c.execute("""
+                    UPDATE users SET total_interactions = total_interactions + 1
+                    WHERE user_id = ?
+                """, (user_id,))
                 conn.commit()
         except Exception as e:
             logger.error(f"Store Chat Error: {e}")
@@ -97,7 +365,7 @@ class Database:
 db = Database()
 
 # ============================================================
-# 3. ROBUST AI ENGINE (Zoya Persona)
+# 4. ROBUST AI ENGINE (Zoya Persona)
 # ============================================================
 
 class AIEngine:
@@ -149,7 +417,7 @@ class AIEngine:
             return "Arre, thoda network issue ho gaya lagta hai. Ek baar phir se bolo na!"
 
 # ============================================================
-# 4. TELEGRAM HANDLERS & CALLBACKS
+# 5. TELEGRAM HANDLERS & CALLBACKS
 # ============================================================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -221,6 +489,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if not update.effective_message or not update.effective_message.text:
             return
+        
         user = update.effective_user
         user_msg = update.effective_message.text
 
@@ -229,17 +498,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current_mood = context.user_data['mood']
 
         await update.effective_chat.send_action("typing")
-        reply = AIEngine.get_response(user_msg, user_name=user.first_name, mood=current_mood)
+        
+        # Get AI response
+        reply = AIEngine.get_response(
+            user_msg, 
+            user_name=user.first_name, 
+            mood=current_mood
+        )
 
+        # STORE-FIRST: Save to Google Sheets BEFORE sending reply
+        if google_sheets.enabled and google_sheets.initialized:
+            try:
+                google_sheets.log_chat_store_first(update=update, bot_reply=reply)
+            except Exception as e:
+                logger.error(f"Google Sheets log error: {e}")
+
+        # Save to SQLite
         db.store_chat(user.id, user_msg, reply)
+        
+        # Send reply to user
         await update.effective_message.reply_text(reply)
+        
     except Exception as e:
         logger.error(f"Handle Message Error: {e}")
         if update.effective_message:
             await update.effective_message.reply_text("Arre, thoda sa glitch aa gaya tha! Dubara kehna kya bol rahe the?")
 
 # ============================================================
-# 5. FLASK WEB SERVER (Health Check for Cloud Hosting)
+# 6. FLASK WEB SERVER (Health Check for Cloud Hosting)
 # ============================================================
 
 app = Flask(__name__)
@@ -253,7 +539,7 @@ def health():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
 # ============================================================
-# 6. SECURE ENTRY POINT
+# 7. SECURE ENTRY POINT
 # ============================================================
 
 if __name__ == '__main__':
@@ -274,5 +560,5 @@ if __name__ == '__main__':
 
     logger.info("✨ Zoya Bot polling starting in main thread...")
     
-    # 3. Run Telegram Polling in the main thread (owns event loop cleanly)
+    # 3. Run Telegram Polling in the main thread
     application.run_polling(allowed_updates=Update.ALL_TYPES)
