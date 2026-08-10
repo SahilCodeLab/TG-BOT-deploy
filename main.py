@@ -1,6 +1,6 @@
 """
 Zoya & Kabir Telegram Bot - Enterprise 3-Tab Google Sheets Architecture
-Developer: SahilCodeLab
+Developer: codewithsahil / SahilCodeLab
 """
 
 import os
@@ -29,6 +29,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "sahilcodelab.db")
 PORT = int(os.getenv("PORT", 8000))
 
+# Fixed: Ensure it parses properly
 ENABLE_GOOGLE_SHEETS = os.getenv("ENABLE_GOOGLE_SHEETS", "false").lower() == "true"
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
@@ -46,7 +47,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. LOCAL SQLITE DATABASE (PERSISTENT USER CHOICE & CHAT CACHE)
+# 2. LOCAL SQLITE DATABASE
 # ============================================================
 class Database:
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -167,13 +168,34 @@ class GoogleSheets3TabManager:
             client = gspread.authorize(creds)
             self.sheet = client.open_by_key(self.spreadsheet_id)
             self.initialized = True
+            
+            # AUTOMATIC HEADER SETUP TO PREVENT MISMATCH ERRORS
+            self._setup_headers()
+            
             print("✅ Google Sheets 3-Tab System Connected Successfully!", flush=True)
         except Exception as e:
             print(f"❌ Google Sheets Connection Failed: {e}", flush=True)
             self.enabled = False
 
+    def _setup_headers(self):
+        """Fixes Tab headers automatically so the logic never breaks."""
+        expected_headers = {
+            "User_Chats": ["User ID", "Full Name", "Username", "User Message", "Bot Reply", "Selected Persona", "Date & Time", "Detected Emotion", "New Fact Extracted"],
+            "Longterm_Memory": ["Memory ID", "User ID", "Category", "Fact / Detail", "Importance", "Date Added"],
+            "User_Profiles": ["User ID", "Full Name", "Username", "Active Persona", "Emotion", "City/Location", "First Seen", "Last Active", "Total Messages"]
+        }
+        
+        for tab, headers in expected_headers.items():
+            try:
+                ws = self.sheet.worksheet(tab)
+                current_headers = ws.row_values(1)
+                if not current_headers or current_headers[0] != headers[0]:
+                    ws.update('A1:[{}1]'.format(chr(64+len(headers))), [headers])
+                    print(f"🛠️ Headers auto-fixed for tab: {tab}", flush=True)
+            except Exception as e:
+                print(f"⚠️ Header setup skipped for {tab} (Tab might not exist): {e}", flush=True)
+
     def fetch_longterm_memories(self, user_id: int) -> str:
-        """Tab 2: Longterm_Memory se user ke facts read karta hai"""
         if not self.enabled or not self.initialized: return ""
         try:
             ws_mem = self.sheet.worksheet("Longterm_Memory")
@@ -194,7 +216,6 @@ class GoogleSheets3TabManager:
             return ""
 
     def sync_user_data(self, update: Update, bot_reply: str, emotion: str = "Neutral", fact_extracted: str = ""):
-        """Teeno Tabs mein Real-time Data Sync karta hai with Detailed Debug Logs"""
         if not self.enabled or not self.initialized: 
             print("⚠️ Google Sheets disabled ya initialized nahi hai!", flush=True)
             return
@@ -213,41 +234,24 @@ class GoogleSheets3TabManager:
             # --- TAB 1: User_Chats ---
             try:
                 ws_chats = self.sheet.worksheet("User_Chats")
-                chat_row = [
-                    str_user_id,
-                    full_name,
-                    username,
-                    (msg.text or '')[:1000],
-                    (bot_reply or '')[:1000],
-                    active_persona,
-                    now_str,
-                    emotion,
-                    fact_extracted
-                ]
+                chat_row = [str_user_id, full_name, username, (msg.text or '')[:1000], (bot_reply or '')[:1000], active_persona, now_str, emotion, fact_extracted]
                 ws_chats.append_row(chat_row, value_input_option='USER_ENTERED')
                 print(f"✅ [User_Chats] Data added for {full_name}", flush=True)
             except Exception as e:
-                print(f"❌ [User_Chats Write Error]: {e} (Tab name check karo)", flush=True)
+                print(f"❌ [User_Chats Write Error]: {e}", flush=True)
 
-            # --- TAB 2: Longterm_Memory (Agar naya fact extracted ho) ---
+            # --- TAB 2: Longterm_Memory ---
             if fact_extracted.strip():
                 try:
                     ws_mem = self.sheet.worksheet("Longterm_Memory")
                     mem_id = len(ws_mem.col_values(1))
-                    mem_row = [
-                        mem_id,
-                        str_user_id,
-                        "General Fact",
-                        fact_extracted,
-                        "High",
-                        datetime.now().strftime("%Y-%m-%d")
-                    ]
+                    mem_row = [mem_id, str_user_id, "General Fact", fact_extracted, "High", datetime.now().strftime("%Y-%m-%d")]
                     ws_mem.append_row(mem_row, value_input_option='USER_ENTERED')
                     print(f"🧠 [Longterm_Memory] Fact added for {str_user_id}", flush=True)
                 except Exception as e:
                     print(f"❌ [Longterm_Memory Write Error]: {e}", flush=True)
 
-            # --- TAB 3: User_Profiles (Upsert Status & Persona) ---
+            # --- TAB 3: User_Profiles ---
             try:
                 ws_prof = self.sheet.worksheet("User_Profiles")
                 user_ids = ws_prof.col_values(1)
@@ -259,17 +263,7 @@ class GoogleSheets3TabManager:
                     ws_prof.update_cell(row_idx, 8, now_str)
                     print(f"👤 [User_Profiles] Profile updated for {str_user_id}", flush=True)
                 else:
-                    prof_row = [
-                        str_user_id,
-                        full_name,
-                        username,
-                        active_persona,
-                        emotion,
-                        "",       # City/Location
-                        now_str,  # First Seen
-                        now_str,  # Last Active
-                        1         # Total Messages
-                    ]
+                    prof_row = [str_user_id, full_name, username, active_persona, emotion, "", now_str, now_str, 1]
                     ws_prof.append_row(prof_row, value_input_option='USER_ENTERED')
                     print(f"👤 [User_Profiles] New Profile Created for {str_user_id}", flush=True)
             except Exception as e:
@@ -310,11 +304,11 @@ USER CONTEXT & MEMORY:
 
 STRICT HUMAN TELEGRAM CHAT RULES:
 1. VERY SHORT REPLIES: Keep replies under 10-25 words. Talk naturally like a friend texting on WhatsApp/Telegram!
-2. NO WEIRD STORIES / HALLUCINATIONS: Do NOT invent made-up events (like 'coffee khana', 'TV dekhna'). Answer directly and relevantly.
+2. NO WEIRD STORIES / HALLUCINATIONS: Do NOT invent made-up events. Answer directly and relevantly.
 3. EMPATHY: If user seems sad, be genuinely caring.
 """
 
-        # GEMINI API (FIRST PRIORITY)
+        # GEMINI API
         if GEMINI_API_KEY:
             try:
                 history = db.get_chat_history(user_id, limit=4)
@@ -399,10 +393,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply, model_used = AIEngine.get_response(user_msg, user.id, user.first_name, gender)
 
-    # Local SQLite Cache Store
     db.store_chat(user.id, user_msg, reply)
 
-    # Background Thread for Sheets Sync (Ensures Fast Telegram Response)
     Thread(target=sheets.sync_user_data, args=(update, reply, "Neutral", ""), daemon=True).start()
 
     await update.effective_message.reply_text(reply)
