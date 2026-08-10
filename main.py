@@ -1,8 +1,9 @@
 """
-Zoya Bot - Tension Relief & Casual Companion (Verified & Fault-Tolerant)
+Zoya Bot - Tension Relief & Casual Companion (Verified & Fault-Tolerant + Weather Support)
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 
 Features:
+- Live Weather Integration (OpenWeatherMap)
 - Google Sheets real-time logging (Store-First)
 - SQLite backup
 - Multi-language support (Hinglish/English)
@@ -16,6 +17,7 @@ import logging
 import sqlite3
 import json
 import time
+import requests
 from datetime import datetime
 from threading import Thread
 from flask import Flask, jsonify
@@ -34,6 +36,7 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "59859d4818e4e5c8a1d33f22fcbf577d")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "sahilcodelab.db")
 PORT = int(os.getenv("PORT", 8000))
 
@@ -60,7 +63,43 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. GOOGLE SHEETS LOGGER (Store-First)
+# 2. WEATHER SERVICE (OpenWeatherMap)
+# ============================================================
+
+class WeatherService:
+    @staticmethod
+    def get_weather(city_name: str) -> str:
+        """Fetch current weather data for a given city"""
+        if not WEATHER_API_KEY:
+            return "Mujhe weather check karne ke liye API key nahi mili."
+        
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={WEATHER_API_KEY}&units=metric"
+        try:
+            res = requests.get(url, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                temp = data['main']['temp']
+                feels_like = data['main']['feels_like']
+                desc = data['weather'][0]['description']
+                city = data['name']
+                humidity = data['main']['humidity']
+                
+                return (
+                    f"🌤 **Weather in {city}:**\n"
+                    f"• Temperature: {temp}°C (Feels like {feels_like}°C)\n"
+                    f"• Condition: {desc.capitalize()}\n"
+                    f"• Humidity: {humidity}%"
+                )
+            elif res.status_code == 404:
+                return f"Mujhe '{city_name}' naam ki koi city nahi mili. Ek baar spelling check karlo na!"
+            else:
+                return "Abhi weather data lane me thodi problem ho rahi hai."
+        except Exception as e:
+            logger.error(f"Weather API Error: {e}")
+            return "Weather fetch karne me error aa gaya."
+
+# ============================================================
+# 3. GOOGLE SHEETS LOGGER (Store-First)
 # ============================================================
 
 class GoogleSheetsLogger:
@@ -219,10 +258,7 @@ class GoogleSheetsLogger:
             return "No Name"
 
     def log_chat_store_first(self, update: Update, bot_reply: str) -> bool:
-        """
-        Log chat to Google Sheets (Store-First)
-        Saves before sending reply to user
-        """
+        """Log chat to Google Sheets (Store-First)"""
         if not self.enabled or not self.initialized:
             return False
         
@@ -234,12 +270,9 @@ class GoogleSheetsLogger:
                 return False
             
             ws = self.sheet.worksheet(self.sheet_name)
-            
-            # Get data
             now = datetime.now()
             serial_no = self._get_next_serial(ws)
             
-            # Get message count from database
             message_count = 0
             try:
                 db = Database()
@@ -249,7 +282,6 @@ class GoogleSheetsLogger:
             except:
                 pass
             
-            # Prepare row
             row_data = [
                 serial_no,
                 now.strftime("%Y-%m-%d"),
@@ -264,7 +296,6 @@ class GoogleSheetsLogger:
                 bot_reply or ''
             ]
             
-            # Append with retry
             for attempt in range(GOOGLE_SHEETS_RETRY):
                 try:
                     ws.append_row(row_data, value_input_option='USER_ENTERED')
@@ -281,11 +312,10 @@ class GoogleSheetsLogger:
             logger.error(f"❌ Google Sheets log failed: {e}")
             return False
 
-# Initialize Google Sheets logger
 google_sheets = GoogleSheetsLogger()
 
 # ============================================================
-# 3. BULLETPROOF DATABASE MANAGER
+# 4. BULLETPROOF DATABASE MANAGER
 # ============================================================
 
 class Database:
@@ -365,7 +395,7 @@ class Database:
 db = Database()
 
 # ============================================================
-# 4. ROBUST AI ENGINE (Zoya Persona)
+# 5. ROBUST AI ENGINE (Zoya Persona)
 # ============================================================
 
 class AIEngine:
@@ -383,7 +413,7 @@ class AIEngine:
     }
 
     @staticmethod
-    def get_response(user_message: str, user_name: str = "User", mood: str = "hinglish") -> str:
+    def get_response(user_message: str, user_name: str = "User", mood: str = "hinglish", weather_context: str = "") -> str:
         mood_instruction = AIEngine.MOOD_PROMPTS.get(mood, AIEngine.MOOD_PROMPTS["hinglish"])
         
         system_prompt = f"""{mood_instruction}
@@ -394,6 +424,9 @@ class AIEngine:
 3. If the user is stressed or tired, comfort them, listen to them patiently, and cheer them up.
 4. Keep conversations light, engaging, deeply human, and warm.
 """
+        if weather_context:
+            system_prompt += f"\n--- LIVE WEATHER CONTEXT ---\nUse this real-time weather information naturally in your reply:\n{weather_context}\n"
+
         try:
             if GROQ_API_KEY:
                 resp = groq_client.chat.completions.create(
@@ -417,7 +450,7 @@ class AIEngine:
             return "Arre, thoda network issue ho gaya lagta hai. Ek baar phir se bolo na!"
 
 # ============================================================
-# 5. TELEGRAM HANDLERS & CALLBACKS
+# 6. TELEGRAM HANDLERS & CALLBACKS
 # ============================================================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -439,6 +472,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Hey **{user.first_name}**! ☕✨ Main Zoya hoon.\n\n"
             "Yahan sab tension bhool jao. Chahe din kaisa bhi raha ho, aram se baitho aur jo dil me aaye woh baatein karo. "
             "Main yahin hoon sunne ke liye!\n\n"
+            "💡 *Tip:* Aap kisi bhi city ka mausam pooch sakte ho, jaise: `Kolkata ka weather kaisa hai?`\n\n"
             f"🧠 **Current Vibe:** `{current_mood.upper()}`"
         )
 
@@ -499,11 +533,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.effective_chat.send_action("typing")
         
-        # Get AI response
+        # Weather Keyword Detection
+        weather_info = ""
+        msg_lower = user_msg.lower()
+        if "weather" in msg_lower or "mausam" in msg_lower or "temperature" in msg_lower:
+            # Extract potential city name from message
+            words = user_msg.split()
+            # Simple heuristic: remove common trigger words to find city
+            ignore_words = {"weather", "mausam", "kaisa", "hai", "in", "ka", "ki", "of", "tell", "me", "what", "is", "the", "today", "aaj"}
+            city_words = [w.strip("?,.!") for w in words if w.lower() not in ignore_words]
+            if city_words:
+                city_name = " ".join(city_words)
+                weather_info = WeatherService.get_weather(city_name)
+
+        # Get AI response with weather context if present
         reply = AIEngine.get_response(
             user_msg, 
             user_name=user.first_name, 
-            mood=current_mood
+            mood=current_mood,
+            weather_context=weather_info
         )
 
         # STORE-FIRST: Save to Google Sheets BEFORE sending reply
@@ -525,7 +573,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_message.reply_text("Arre, thoda sa glitch aa gaya tha! Dubara kehna kya bol rahe the?")
 
 # ============================================================
-# 6. FLASK WEB SERVER (Health Check for Cloud Hosting)
+# 7. FLASK WEB SERVER (Health Check for Cloud Hosting)
 # ============================================================
 
 app = Flask(__name__)
@@ -539,7 +587,7 @@ def health():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
 # ============================================================
-# 7. SECURE ENTRY POINT
+# 8. SECURE ENTRY POINT
 # ============================================================
 
 if __name__ == '__main__':
