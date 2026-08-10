@@ -1,5 +1,5 @@
 """
-Zoya & Kabir Telegram Bot - Database Fixed & Clean State Management
+Zoya & Kabir Telegram Bot - Enterprise 3-Tab Google Sheets Architecture
 Developer: SahilCodeLab
 """
 
@@ -8,8 +8,7 @@ import sys
 import logging
 import sqlite3
 import json
-import re
-import requests
+import time
 from datetime import datetime
 from threading import Thread
 from flask import Flask, jsonify
@@ -22,16 +21,14 @@ from telegram.ext import (
 )
 
 # ============================================================
-# 1. CONFIGURATION & ENVIRONMENT CHECK
+# 1. CONFIGURATION & ENVIRONMENT
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "59859d4818e4e5c8a1d33f22fcbf577d")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "sahilcodelab.db")
 PORT = int(os.getenv("PORT", 8000))
 
-# Google Sheets Config
 ENABLE_GOOGLE_SHEETS = os.getenv("ENABLE_GOOGLE_SHEETS", "false").lower() == "true"
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
@@ -45,14 +42,11 @@ if GEMINI_API_KEY:
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. FIXED DATABASE MANAGER (PERSISTENT GENDER & HISTORY)
+# 2. LOCAL SQLITE DATABASE (FAST CACHE & HISTORY)
 # ============================================================
 class Database:
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -63,12 +57,10 @@ class Database:
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
-                # Added 'gender' column to persist user choice
                 c.execute('''CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     name TEXT,
-                    joined_date TIMESTAMP,
                     gender TEXT DEFAULT 'girl',
                     total_interactions INTEGER DEFAULT 0
                 )''')
@@ -79,22 +71,18 @@ class Database:
                     bot_response TEXT,
                     timestamp TIMESTAMP
                 )''')
-                c.execute('''CREATE INDEX IF NOT EXISTS idx_chat_user_id ON chat_history(user_id)''')
                 conn.commit()
         except Exception as e:
             logger.error(f"Database Init Error: {e}")
 
-    def save_user(self, user_id: int, username: str, name: str, gender: str = "girl"):
+    def save_user(self, user_id: int, username: str, name: str):
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
                 c.execute("""
-                    INSERT INTO users (user_id, username, name, joined_date, gender)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET
-                    username=excluded.username,
-                    name=excluded.name
-                """, (user_id, username, name, datetime.now().isoformat(), gender))
+                    INSERT INTO users (user_id, username, name) VALUES (?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, name=excluded.name
+                """, (user_id, username, name))
                 conn.commit()
         except Exception as e:
             logger.error(f"Save User Error: {e}")
@@ -114,11 +102,8 @@ class Database:
                 c = conn.cursor()
                 c.execute("SELECT gender FROM users WHERE user_id = ?", (user_id,))
                 row = c.fetchone()
-                if row and row[0]:
-                    return row[0]
-                return "girl"
+                return row[0] if row and row[0] else "girl"
         except Exception as e:
-            logger.error(f"Get Gender Error: {e}")
             return "girl"
 
     def store_chat(self, user_id: int, user_msg: str, bot_resp: str):
@@ -136,10 +121,7 @@ class Database:
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
-                c.execute("""
-                    SELECT user_message, bot_response FROM chat_history 
-                    WHERE user_id = ? ORDER BY id DESC LIMIT ?
-                """, (user_id, limit))
+                c.execute("SELECT user_message, bot_response FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
                 rows = c.fetchall()
                 history = []
                 for user_msg, bot_resp in reversed(rows):
@@ -147,7 +129,6 @@ class Database:
                     if bot_resp: history.append({"role": "assistant", "content": bot_resp})
                 return history
         except Exception as e:
-            logger.error(f"Error fetching history: {e}")
             return []
 
     def clear_user_history(self, user_id: int):
@@ -162,15 +143,13 @@ class Database:
 db = Database()
 
 # ============================================================
-# 3. GOOGLE SHEETS LOGGER (Col L & M)
+# 3. GOOGLE SHEETS ENTERPRISE MANAGER (3 TABS)
 # ============================================================
-class GoogleSheetsLogger:
+class GoogleSheets3TabManager:
     def __init__(self):
         self.enabled = ENABLE_GOOGLE_SHEETS
         self.spreadsheet_id = SPREADSHEET_ID
         self.credentials = GOOGLE_SHEETS_CREDENTIALS
-        self.sheet_name = "Chats"
-        self.client = None
         self.sheet = None
         self.initialized = False
 
@@ -185,251 +164,241 @@ class GoogleSheetsLogger:
             scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
             creds_dict = json.loads(self.credentials)
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-            self.client = gspread.authorize(creds)
-            self.sheet = self.client.open_by_key(self.spreadsheet_id)
+            client = gspread.authorize(creds)
+            self.sheet = client.open_by_key(self.spreadsheet_id)
             self.initialized = True
-            logger.info("✅ Google Sheets Ready")
+            logger.info("✅ Google Sheets 3-Tab Connected Successfully")
         except Exception as e:
-            logger.error(f"❌ Google Sheets init failed: {e}")
+            logger.error(f"❌ Google Sheets Connection Failed: {e}")
             self.enabled = False
 
-    def fetch_user_sheet_memory(self, user_id: int) -> str:
-        if not self.enabled or not self.initialized:
-            return ""
+    def fetch_longterm_memories(self, user_id: int) -> str:
+        """Tab 2: Longterm_Memory se user ke facts read karta hai"""
+        if not self.enabled or not self.initialized: return ""
         try:
-            ws = self.sheet.worksheet(self.sheet_name)
-            col_m_values = ws.col_values(13)  # Column M: user id
-            col_l_values = ws.col_values(12)  # Column L: User chat memory stored
+            ws_mem = self.sheet.worksheet("Longterm_Memory")
+            records = ws_mem.get_all_records()
+            str_id = str(user_id)
             
-            str_u_id = str(user_id)
-            memories = []
+            facts = []
+            for row in records:
+                if str(row.get("User ID", "")).strip() == str_id:
+                    cat = row.get("Category", "")
+                    fact = row.get("Fact / Detail", "")
+                    if fact:
+                        facts.append(f"[{cat}] {fact}" if cat else fact)
             
-            for idx, u_id in enumerate(col_m_values):
-                if str(u_id).strip() == str_u_id and idx < len(col_l_values):
-                    mem_text = col_l_values[idx].strip()
-                    if mem_text and mem_text.lower() != "user chat memory stored":
-                        memories.append(mem_text)
-            
-            if memories:
-                recent = list(dict.fromkeys(memories))[-2:]
-                return " | ".join(recent)
-            return ""
+            return " | ".join(facts) if facts else ""
         except Exception as e:
-            logger.error(f"Error fetching sheet memory: {e}")
+            logger.error(f"Error fetching Longterm_Memory tab: {e}")
             return ""
 
-    def log_chat_store_first(self, update: Update, bot_reply: str, memory_note: str = "") -> bool:
-        if not self.enabled or not self.initialized:
-            return False
+    def sync_user_data(self, update: Update, bot_reply: str, emotion: str = "Neutral", fact_extracted: str = ""):
+        """Teeno Tabs mein Sync Update karta hai"""
+        if not self.enabled or not self.initialized: return
         try:
             user = update.effective_user
-            message = update.effective_message
-            if not user or not message:
-                return False
-            
-            ws = self.sheet.worksheet(self.sheet_name)
-            now = datetime.now()
-            
-            row_data = [
-                len(ws.col_values(1)) + 1,
-                now.strftime("%Y-%m-%d"),
-                now.strftime("%H:%M:%S"),
-                now.isoformat(),
-                str(user.id),
-                user.username or 'No Username',
-                f"{user.first_name or ''} {user.last_name or ''}".strip(),
-                0,
-                "Text" if message.text else "Media",
-                (message.text or message.caption or "Media")[:1000],
-                (bot_reply or '')[:1000],
-                memory_note or (message.text or '')[:200], # Col L
-                str(user.id) # Col M
-            ]
-            
-            ws.append_row(row_data, value_input_option='USER_ENTERED')
-            return True
-        except Exception as e:
-            logger.error(f"Google Sheets log failed: {e}")
-            return False
+            msg = update.effective_message
+            if not user or not msg: return
 
-google_sheets = GoogleSheetsLogger()
+            str_user_id = str(user.id)
+            full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            username = user.username or 'No Username'
+            active_persona = "Zoya" if db.get_user_gender(user.id) == "girl" else "Kabir"
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # --- TAB 1: User_Chats ---
+            ws_chats = self.sheet.worksheet("User_Chats")
+            chat_row = [
+                str_user_id,
+                full_name,
+                username,
+                (msg.text or '')[:1000],
+                (bot_reply or '')[:1000],
+                active_persona,
+                now_str,
+                emotion,
+                fact_extracted
+            ]
+            ws_chats.append_row(chat_row, value_input_option='USER_ENTERED')
+
+            # --- TAB 2: Longterm_Memory (Agar koi naya fact extracted hua ho) ---
+            if fact_extracted.strip():
+                ws_mem = self.sheet.worksheet("Longterm_Memory")
+                mem_id = len(ws_mem.col_values(1))
+                mem_row = [
+                    mem_id,
+                    str_user_id,
+                    "General Fact",
+                    fact_extracted,
+                    "High",
+                    datetime.now().strftime("%Y-%m-%d")
+                ]
+                ws_mem.append_row(mem_row, value_input_option='USER_ENTERED')
+
+            # --- TAB 3: User_Profiles (User ki Status Row upsert) ---
+            ws_prof = self.sheet.worksheet("User_Profiles")
+            user_ids = ws_prof.col_values(1)
+            
+            if str_user_id in user_ids:
+                row_idx = user_ids.index(str_user_id) + 1
+                # Update Active Persona, Mood, Last Active
+                ws_prof.update_cell(row_idx, 4, active_persona)
+                ws_prof.update_cell(row_idx, 5, emotion)
+                ws_prof.update_cell(row_idx, 8, now_str)
+            else:
+                # Add New Profile
+                prof_row = [
+                    str_user_id,
+                    full_name,
+                    username,
+                    active_persona,
+                    emotion,
+                    "", # City/Location
+                    now_str, # First Seen
+                    now_str, # Last Active
+                    1 # Total Messages
+                ]
+                ws_prof.append_row(prof_row, value_input_option='USER_ENTERED')
+
+        except Exception as e:
+            logger.error(f"Error syncing to 3-Tab Google Sheets: {e}")
+
+sheets = GoogleSheets3TabManager()
 
 # ============================================================
-# 4. AI ENGINE (STRICT REALISTIC PERSONA)
+# 4. REALISTIC AI ENGINE
 # ============================================================
 class AIEngine:
     @staticmethod
-    def get_response(user_message: str, user_id: int, user_name: str = "Friend", gender: str = "girl") -> str:
-        sheet_memory = google_sheets.fetch_user_sheet_memory(user_id)
+    def get_response(user_message: str, user_id: int, user_name: str, gender: str) -> tuple[str, str]:
+        longterm_facts = sheets.fetch_longterm_memories(user_id)
         
         if gender == "girl":
             gender_rules = """
 YOUR NAME: ZOYA (Female Best Friend)
 STRICT GRAMMAR RULES:
-- Talk like a normal young Indian girl on WhatsApp/Telegram.
-- Use ONLY female self-referencing Hindi words: 'main theek hoon', 'soch rahi thi', 'aa gayi', 'karti hoon', 'sun rahi hoon', 'batao na'.
+- Use ONLY female self-referencing words: 'main theek hoon', 'soch rahi thi', 'aa gayi', 'karti hoon', 'sun rahi hoon', 'batao na'.
 - NEVER use male words for yourself like 'sunta hoon', 'karta hoon', 'aaya tha', 'bhai'.
 """
         else:
             gender_rules = """
 YOUR NAME: KABIR (Male Best Friend)
 STRICT GRAMMAR RULES:
-- Talk like a normal close guy friend/bro.
-- Use male self-referencing Hindi words: 'main theek hoon', 'soch raha tha', 'karta hoon', 'bro', 'bhai', 'sun raha hoon'.
+- Use male self-referencing words: 'main theek hoon', 'soch raha tha', 'karta hoon', 'bro', 'bhai', 'sun raha hoon'.
 """
 
         system_instruction = f"""{gender_rules}
 
-CONTEXT & MEMORY:
+USER CONTEXT & MEMORY:
 - User Name: {user_name}
-- Past Memory: {sheet_memory if sheet_memory else 'None'}
+- Saved Longterm Memory Facts: {longterm_facts if longterm_facts else 'None'}
 
-STRICT HUMAN CHAT RULES:
-1. VERY SHORT REPLIES: Keep replies under 10-25 words. Speak casually like a real person sending a quick text!
-2. NO WEIRD PHILOSOPHY / NO HALLUCINATIONS: Do NOT make up stories (like 'coffee khana', 'TV dekhna', 'kuch dinon baad aayi hai'). Answer directly to what the user said!
-3. EMPATHY MATCHING: If the user says they are sad or crying, be genuinely supportive ("Kya hua yaar? Sab theek hai? Mujhse share kar.").
-4. NO DATES/TIME: Never mention system dates/time.
+STRICT HUMAN TELEGRAM CHAT RULES:
+1. VERY SHORT REPLIES: Keep replies under 10-25 words. Talk naturally like a friend texting on WhatsApp/Telegram!
+2. NO WEIRD STORIES / HALLUCINATIONS: Do NOT invent made-up events (like 'coffee khana', 'TV dekhna'). Answer directly and relevantly.
+3. EMPATHY: If user seems sad, be genuinely caring.
 """
 
-        # GEMINI API (FIRST PRIORITY)
         if GEMINI_API_KEY:
             try:
-                history_data = db.get_chat_history(user_id, limit=4)
-                gemini_history = []
-                for msg in history_data:
-                    role = "user" if msg["role"] == "user" else "model"
-                    gemini_history.append({"role": role, "parts": [msg["content"]]})
+                history = db.get_chat_history(user_id, limit=4)
+                gemini_hist = [{"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]} for m in history]
 
                 model = genai.GenerativeModel(
                     model_name='gemini-1.5-flash',
                     system_instruction=system_instruction,
                     generation_config={"temperature": 0.4, "max_output_tokens": 80}
                 )
-                
-                chat = model.start_chat(history=gemini_history)
-                response = chat.send_message(user_message)
-                return response.text.strip()
+                chat = model.start_chat(history=gemini_hist)
+                resp = chat.send_message(user_message)
+                return resp.text.strip(), "Gemini-1.5-Flash"
             except Exception as e:
-                logger.error(f"Gemini API Error: {e}")
+                logger.error(f"Gemini Error: {e}")
 
-        # GROQ FALLBACK
         if groq_client:
             try:
-                messages = [{"role": "system", "content": system_instruction}]
-                messages.extend(db.get_chat_history(user_id, limit=4))
-                messages.append({"role": "user", "content": user_message})
+                msgs = [{"role": "system", "content": system_instruction}]
+                msgs.extend(db.get_chat_history(user_id, limit=4))
+                msgs.append({"role": "user", "content": user_message})
 
                 resp = groq_client.chat.completions.create(
-                    model="llama-3.1-8b-instant",
-                    messages=messages,
-                    temperature=0.4,
-                    max_tokens=80
+                    model="llama-3.1-8b-instant", messages=msgs, temperature=0.4, max_tokens=80
                 )
-                return resp.choices[0].message.content.strip()
+                return resp.choices[0].message.content.strip(), "Groq-Llama3"
             except Exception as e:
-                logger.error(f"Groq API Error: {e}")
+                logger.error(f"Groq Error: {e}")
 
-        return "Arre thoda network slow hai, ek baar firse bolna?"
+        return "Arre thoda network slow hai, ek baar firse bolna?", "Error"
 
 # ============================================================
 # 5. TELEGRAM HANDLERS
 # ============================================================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        user = update.effective_user
-        db.save_user(user.id, user.username, user.first_name)
-        
-        current_gender = db.get_user_gender(user.id)
-        bot_name = "👧 Zoya (Female Friend)" if current_gender == 'girl' else "👦 Kabir (Male Friend)"
+    user = update.effective_user
+    db.save_user(user.id, user.username, user.first_name)
+    current_gender = db.get_user_gender(user.id)
+    bot_name = "👧 Zoya" if current_gender == 'girl' else "👦 Kabir"
 
-        keyboard = [
-            [
-                InlineKeyboardButton("👧 Zoya (Girl)", callback_data="setgender_girl"),
-                InlineKeyboardButton("👦 Kabir (Boy)", callback_data="setgender_boy")
-            ],
-            [InlineKeyboardButton("💬 Reset Memory & Chat", callback_data="fresh_chat")]
-        ]
+    keyboard = [
+        [
+            InlineKeyboardButton("👧 Zoya (Girl)", callback_data="setgender_girl"),
+            InlineKeyboardButton("👦 Kabir (Boy)", callback_data="setgender_boy")
+        ],
+        [InlineKeyboardButton("💬 Reset Memory", callback_data="fresh_chat")]
+    ]
 
-        welcome_msg = (
-            f"Hey **{user.first_name}**! ☕✨\n\n"
-            f"Abhi main **{bot_name}** mode me hoon.\n"
-            "Choose kar lo kisse baat karni hai!"
-        )
-
-        if update.message:
-            await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-        elif update.callback_query:
-            await update.callback_query.message.edit_text(welcome_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-    except Exception as e:
-        logger.error(f"Start Command Error: {e}")
+    msg = f"Hey **{user.first_name}**! ☕✨\n\nAbhi main **{bot_name}** mode me hoon. Choose kar lo kisse baat karni hai!"
+    
+    if update.message:
+        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    elif update.callback_query:
+        await update.callback_query.message.edit_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    db.clear_user_history(user.id)
-    await update.message.reply_text("🧹 Database se saari purani kharab chat history saaf kar di gayi hai! Ab bilkul fresh baat hogi.")
+    db.clear_user_history(update.effective_user.id)
+    await update.message.reply_text("🧹 Database se purani kharab chat history saaf kar di gayi hai!")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        query = update.callback_query
-        await query.answer()
+    query = update.callback_query
+    await query.answer()
 
-        if query.data.startswith("setgender_"):
-            new_gender = query.data.split("_")[1]
-            db.set_user_gender(query.from_user.id, new_gender)
-            name = "👧 Zoya" if new_gender == "girl" else "👦 Kabir"
-            
-            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_home")]]
-            await query.message.edit_text(f"✨ Done! Ab main **{name}** bankar baat karungi/karunga.", reply_markup=InlineKeyboardMarkup(keyboard))
-
-        elif query.data == "fresh_chat":
-            db.clear_user_history(query.from_user.id)
-            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_home")]]
-            await query.message.edit_text("🔄 Purani memory database se clear kar di hai!", reply_markup=InlineKeyboardMarkup(keyboard))
-
-        elif query.data == "menu_home":
-            await query.message.delete()
-            await start_command(update, context)
-    except Exception as e:
-        logger.error(f"Button Handler Error: {e}")
+    if query.data.startswith("setgender_"):
+        g = query.data.split("_")[1]
+        db.set_user_gender(query.from_user.id, g)
+        name = "👧 Zoya" if g == "girl" else "👦 Kabir"
+        await query.message.edit_text(f"✨ Done! Ab se main **{name}** bankar baat karungi/karunga.")
+    elif query.data == "fresh_chat":
+        db.clear_user_history(query.from_user.id)
+        await query.message.edit_text("🔄 Local memory clear kar di gayi hai!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if not update.effective_message or not update.effective_message.text:
-            return
-        
-        user = update.effective_user
-        user_msg = update.effective_message.text
-        gender = db.get_user_gender(user.id)
+    if not update.effective_message or not update.effective_message.text: return
+    
+    user = update.effective_user
+    user_msg = update.effective_message.text
+    gender = db.get_user_gender(user.id)
 
-        await update.effective_chat.send_action("typing")
+    await update.effective_chat.send_action("typing")
 
-        reply = AIEngine.get_response(
-            user_msg, 
-            user_id=user.id,
-            user_name=user.first_name, 
-            gender=gender
-        )
+    reply, model_used = AIEngine.get_response(user_msg, user.id, user.first_name, gender)
 
-        if google_sheets.enabled and google_sheets.initialized:
-            try:
-                google_sheets.log_chat_store_first(update=update, bot_reply=reply, memory_note=user_msg)
-            except Exception as e:
-                logger.error(f"Sheets error: {e}")
+    # SQLite Store
+    db.store_chat(user.id, user_msg, reply)
 
-        db.store_chat(user.id, user_msg, reply)
-        await update.effective_message.reply_text(reply)
-        
-    except Exception as e:
-        logger.error(f"Handle Message Error: {e}")
+    # Background Thread for Sheets Sync (Ensures Fast Telegram Response)
+    Thread(target=sheets.sync_user_data, args=(update, reply, "Neutral", ""), daemon=True).start()
+
+    await update.effective_message.reply_text(reply)
 
 # ============================================================
-# 6. FLASK SERVER & BOT RUNNER
+# 6. FLASK SERVER & ENTRYPOINT
 # ============================================================
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return jsonify({"brand": "SahilCodeLab", "bot": "Zoya/Kabir", "status": "Online"})
+    return jsonify({"bot": "Zoya/Kabir", "sheets_system": "3-Tab Active", "status": "Online"})
 
 if __name__ == '__main__':
     Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False), daemon=True).start()
@@ -440,5 +409,5 @@ if __name__ == '__main__':
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("✨ Bot Started...")
+    logger.info("✨ Bot Started with 3-Tab Google Sheets Integration...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
