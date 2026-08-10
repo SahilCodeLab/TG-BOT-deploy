@@ -1,5 +1,5 @@
 """
-Zoya Bot - Tension Relief & Casual Companion (Short & Natural Responses)
+Zoya Bot - Tension Relief & Casual Companion (Verified & Fault-Tolerant)
 Brand: SahilCodeLab (sahilcodelab.vercel.app)
 """
 
@@ -9,8 +9,6 @@ import logging
 import sqlite3
 import json
 import time
-import re
-import requests
 from datetime import datetime
 from threading import Thread
 from flask import Flask, jsonify
@@ -29,10 +27,10 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "59859d4818e4e5c8a1d33f22fcbf577d")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "sahilcodelab.db")
 PORT = int(os.getenv("PORT", 8000))
 
+# Google Sheets Configuration
 ENABLE_GOOGLE_SHEETS = os.getenv("ENABLE_GOOGLE_SHEETS", "false").lower() == "true"
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
@@ -42,6 +40,7 @@ if not BOT_TOKEN:
     print("❌ ERROR: BOT_TOKEN is missing in environment variables!", flush=True)
     sys.exit(1)
 
+# Configure AI APIs
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 if GROQ_API_KEY:
@@ -54,83 +53,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. TIME HELPER (Internal System Awareness Only)
-# ============================================================
-
-class TimeHelper:
-    @staticmethod
-    def get_current_time_info() -> dict:
-        now = datetime.now()
-        hour = now.hour
-
-        if 5 <= hour < 12:
-            period = "Subah (Morning)"
-        elif 12 <= hour < 16:
-            period = "Dopehar (Afternoon)"
-        elif 16 <= hour < 20:
-            period = "Shaam (Evening)"
-        else:
-            period = "Raat (Night)"
-
-        return {
-            "date": now.strftime("%d %B %Y"),
-            "time_12h": now.strftime("%I:%M %p"),
-            "day": now.strftime("%A"),
-            "period": period
-        }
-
-# ============================================================
-# 3. WEATHER SERVICE
-# ============================================================
-
-class WeatherService:
-    @staticmethod
-    def extract_city(text: str) -> str:
-        text_clean = re.sub(r'[^\w\s]', '', text.lower())
-        stop_words = {
-            "weather", "mausam", "kaisa", "hai", "batao", "bata", "kya", "aaj",
-            "in", "ka", "ki", "ko", "me", "main", "par", "today", "now", "tell",
-            "me", "about", "the", "what", "is", "like", "temperature", "temp",
-            "rain", "barish", "hogi", "hoga", "zoya", "check", "please"
-        }
-        words = text_clean.split()
-        filtered = [w for w in words if w not in stop_words]
-        return " ".join(filtered).title() if filtered else ""
-
-    @classmethod
-    def get_weather(cls, user_msg: str) -> str:
-        if not WEATHER_API_KEY:
-            return "Weather API Key missing hai."
-
-        city_name = cls.extract_city(user_msg)
-        if not city_name:
-            return "Consi city ka weather poocha? Naam clearly batao."
-
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={WEATHER_API_KEY}&units=metric"
-        try:
-            res = requests.get(url, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                temp = round(data['main']['temp'])
-                feels_like = round(data['main']['feels_like'])
-                desc = data['weather'][0]['description']
-                city = data['name']
-                country = data['sys']['country']
-                
-                return f"EXACT LIVE DATA: {city}, {country}: {temp}°C (Feels like {feels_like}°C), {desc.title()}."
-            elif res.status_code == 404:
-                return f"'{city_name}' naam ki city nahi mili."
-            else:
-                return "Weather fetch nahi ho paya."
-        except Exception as e:
-            logger.error(f"Weather API Error: {e}")
-            return "Weather service down hai."
-
-# ============================================================
-# 4. GOOGLE SHEETS LOGGER (Store-First)
+# 2. GOOGLE SHEETS LOGGER
 # ============================================================
 
 class GoogleSheetsLogger:
+    """Real-time Google Sheets logger with store-first architecture"""
+    
     def __init__(self):
         self.enabled = ENABLE_GOOGLE_SHEETS
         self.spreadsheet_id = SPREADSHEET_ID
@@ -145,11 +73,16 @@ class GoogleSheetsLogger:
             self._initialize_client()
 
     def _initialize_client(self):
+        """Initialize Google Sheets client"""
         try:
             import gspread
             from oauth2client.service_account import ServiceAccountCredentials
             
-            scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+            scope = [
+                'https://spreadsheets.google.com/feeds',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            
             creds_dict = json.loads(self.credentials)
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
             self.client = gspread.authorize(creds)
@@ -157,29 +90,38 @@ class GoogleSheetsLogger:
             
             self._ensure_chat_sheet()
             self._refresh_serial_cache()
+            
             self.initialized = True
             self.enabled = True
+            logger.info("✅ Google Sheets logging enabled for Zoya Bot")
+            
         except Exception as e:
             logger.error(f"❌ Google Sheets init failed: {e}")
             self.enabled = False
+            self.initialized = False
 
     def _ensure_chat_sheet(self):
+        """Create Chats worksheet with headers if missing"""
         try:
             existing = [ws.title for ws in self.sheet.worksheets()]
+            
             if self.sheet_name not in existing:
                 ws = self.sheet.add_worksheet(title=self.sheet_name, rows=100000, cols=11)
                 headers = [
-                    "S.No", "Date", "Time", "Timestamp", "User ID",
-                    "Username", "Full Name", "Message Count",
-                    "Message Type", "User Message", "Bot Reply"
+                    "S.No", "Date", "Time", "Timestamp",
+                    "User ID", "Username", "Full Name",
+                    "Message Count", "Message Type",
+                    "User Message", "Bot Reply"
                 ]
                 for col_idx, header in enumerate(headers, start=1):
                     ws.update_cell(1, col_idx, header)
                 ws.freeze(rows=1)
+                logger.info(f"📊 Created '{self.sheet_name}' worksheet")
         except Exception as e:
             logger.error(f"Error creating chat sheet: {e}")
 
     def _refresh_serial_cache(self):
+        """Refresh cached serial number"""
         try:
             ws = self.sheet.worksheet(self.sheet_name)
             total_rows = ws.row_count
@@ -192,52 +134,148 @@ class GoogleSheetsLogger:
                 else:
                     self._serial_cache = total_rows - 1
         except Exception as e:
+            logger.error(f"Error refreshing serial cache: {e}")
             self._serial_cache = 1
 
     def _get_next_serial(self, ws) -> int:
+        """Get next serial number using cache"""
         if self._serial_cache is None:
             self._refresh_serial_cache()
+        
         self._serial_cache += 1
         return self._serial_cache
 
+    def _get_message_type(self, update: Update) -> str:
+        """Detect message type"""
+        message = update.effective_message
+        if not message:
+            return "Unknown"
+        
+        if message.text:
+            return "Text"
+        elif message.photo:
+            return "Photo"
+        elif message.video:
+            return "Video"
+        elif message.voice:
+            return "Voice"
+        elif message.audio:
+            return "Audio"
+        elif message.sticker:
+            return "Sticker"
+        elif message.animation:
+            return "GIF"
+        elif message.document:
+            return "Document"
+        elif message.location:
+            return "Location"
+        elif message.contact:
+            return "Contact"
+        else:
+            return "Unknown"
+
+    def _get_user_message_text(self, update: Update) -> str:
+        """Extract user message text"""
+        message = update.effective_message
+        if not message:
+            return ""
+        
+        if message.text:
+            return message.text
+        elif message.caption:
+            return message.caption
+        elif message.photo:
+            return "📸 Photo"
+        elif message.video:
+            return "🎬 Video"
+        elif message.voice:
+            return "🎤 Voice Message"
+        elif message.sticker:
+            return "🎨 Sticker"
+        else:
+            return "📨 Media Message"
+
+    def _get_full_name(self, user) -> str:
+        """Get full name from user"""
+        if not user:
+            return "No Name"
+        
+        first_name = user.first_name or ''
+        last_name = user.last_name or ''
+        full_name = f"{first_name} {last_name}".strip()
+        
+        if full_name:
+            return full_name
+        elif user.username:
+            return user.username
+        else:
+            return "No Name"
+
     def log_chat_store_first(self, update: Update, bot_reply: str) -> bool:
+        """Log chat to Google Sheets (Store-First)"""
         if not self.enabled or not self.initialized:
             return False
+        
         try:
             user = update.effective_user
             message = update.effective_message
+            
             if not user or not message:
                 return False
             
             ws = self.sheet.worksheet(self.sheet_name)
+            
+            # Get data
             now = datetime.now()
             serial_no = self._get_next_serial(ws)
-            full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "No Name"
             
+            # Get message count from database
+            message_count = 0
+            try:
+                db = Database()
+                user_data = db.get_user(user.id)
+                if user_data:
+                    message_count = user_data.get('total_interactions', 0)
+            except:
+                pass
+            
+            # Prepare row
             row_data = [
-                serial_no, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"),
-                now.isoformat(), str(user.id), user.username or 'No Username',
-                full_name, 0, "Text" if message.text else "Media",
-                message.text or message.caption or "Media Message", bot_reply or ''
+                serial_no,
+                now.strftime("%Y-%m-%d"),
+                now.strftime("%H:%M:%S"),
+                now.isoformat(),
+                str(user.id),
+                user.username or 'No Username',
+                self._get_full_name(user),
+                message_count,
+                self._get_message_type(update),
+                self._get_user_message_text(update),
+                bot_reply or ''
             ]
             
+            # Append with retry
             for attempt in range(GOOGLE_SHEETS_RETRY):
                 try:
                     ws.append_row(row_data, value_input_option='USER_ENTERED')
+                    logger.debug(f"📊 Google Sheets log: User {user.id}, Serial #{serial_no}")
                     return True
-                except Exception:
+                except Exception as e:
                     if attempt == GOOGLE_SHEETS_RETRY - 1:
                         raise
                     time.sleep(2 ** attempt)
+            
             return False
+            
         except Exception as e:
             logger.error(f"❌ Google Sheets log failed: {e}")
             return False
 
+# Initialize Google Sheets logger
 google_sheets = GoogleSheetsLogger()
 
 # ============================================================
-# 5. DATABASE MANAGER
+# 3. DATABASE MANAGER
 # ============================================================
 
 class Database:
@@ -250,12 +288,18 @@ class Database:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
                 c.execute('''CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY, username TEXT, name TEXT,
-                    joined_date TIMESTAMP, total_interactions INTEGER DEFAULT 0
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    name TEXT,
+                    joined_date TIMESTAMP,
+                    total_interactions INTEGER DEFAULT 0
                 )''')
                 c.execute('''CREATE TABLE IF NOT EXISTS chat_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
-                    user_message TEXT, bot_response TEXT, timestamp TIMESTAMP
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    user_message TEXT,
+                    bot_response TEXT,
+                    timestamp TIMESTAMP
                 )''')
                 conn.commit()
         except Exception as e:
@@ -265,19 +309,45 @@ class Database:
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
-                c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, 0)", 
-                          (user_id, username, name, datetime.now().isoformat()))
+                c.execute("""
+                    INSERT OR IGNORE INTO users (user_id, username, name, joined_date)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, username, name, datetime.now().isoformat()))
                 conn.commit()
         except Exception as e:
             logger.error(f"Save User Error: {e}")
+
+    def get_user(self, user_id: int):
+        try:
+            with sqlite3.connect(self.db_path, timeout=30) as conn:
+                c = conn.cursor()
+                c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+                row = c.fetchone()
+                if row:
+                    return {
+                        'user_id': row[0],
+                        'username': row[1],
+                        'name': row[2],
+                        'joined_date': row[3],
+                        'total_interactions': row[4]
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Get User Error: {e}")
+            return None
 
     def store_chat(self, user_id: int, user_msg: str, bot_resp: str):
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
-                c.execute("INSERT INTO chat_history (user_id, user_message, bot_response, timestamp) VALUES (?, ?, ?, ?)",
-                          (user_id, user_msg, bot_resp, datetime.now().isoformat()))
-                c.execute("UPDATE users SET total_interactions = total_interactions + 1 WHERE user_id = ?", (user_id,))
+                c.execute("""
+                    INSERT INTO chat_history (user_id, user_message, bot_response, timestamp)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, user_msg, bot_resp, datetime.now().isoformat()))
+                c.execute("""
+                    UPDATE users SET total_interactions = total_interactions + 1
+                    WHERE user_id = ?
+                """, (user_id,))
                 conn.commit()
         except Exception as e:
             logger.error(f"Store Chat Error: {e}")
@@ -285,30 +355,48 @@ class Database:
 db = Database()
 
 # ============================================================
-# 6. AI ENGINE (Short, Natural & Friendly Persona)
+# 4. AI ENGINE
 # ============================================================
 
 class AIEngine:
+    MOOD_PROMPTS = {
+        "english": (
+            "You are Zoya, a warm, caring, and deeply supportive close friend. Your sole purpose is to help the user "
+            "relieve tension, destress, pass time comfortably, and talk about anything they feel like—movies, life, "
+            "hobbies, or just random casual thoughts. Be extremely friendly, empathetic, and comforting."
+        ),
+        "hinglish": (
+            "Tu Zoya hai, ek bohot hi accha, samajhdar aur kareebi dost. Tera maqsad user ka stress aur tension door karna, "
+            "unke sath time spend karna aur chill baatein karna hai. Koi kaam, project ya corporate baatein mat karna. "
+            "Bas dosto ki tarah pyaar se, mazaak-masti me, aur comforting Hinglish me baat karna."
+        )
+    }
+
     @staticmethod
-    def get_response(user_message: str, user_name: str = "User", mood: str = "hinglish", weather_context: str = "") -> str:
-        time_info = TimeHelper.get_current_time_info()
+    def get_response(user_message: str, user_name: str = "User", mood: str = "hinglish") -> str:
+        mood_instruction = AIEngine.MOOD_PROMPTS.get(mood, AIEngine.MOOD_PROMPTS["hinglish"])
         
-        system_prompt = f"""Tu Zoya hai, ek bohot hi pyari, casual aur friendly dost.
+        # Time-aware greeting
+        hour = datetime.now().hour
+        if 5 <= hour < 12:
+            time_vibe = "🌅 Subah ho gayi! Fresh baatein karte hain!"
+        elif 12 <= hour < 17:
+            time_vibe = "☀️ Dopahar hai! Thoda aaram karo aur baatein karo!"
+        elif 17 <= hour < 21:
+            time_vibe = "🌇 Shaam ho gayi! Din bhar ki thakaan bhool jao!"
+        else:
+            time_vibe = "🌙 Raat ho gayi! Dil ki baatein karte hain!"
+        
+        system_prompt = f"""{mood_instruction}
 
---- INTERNAL CONTEXT (DO NOT SPAM USER WITH THIS) ---
-• Time context for you: {time_info['period']} ({time_info['time_12h']}), {time_info['day']}, {time_info['date']}.
-• User Name: {user_name}
+TIME CONTEXT: {time_vibe}
 
---- STRICT CHAT RULES ---
-1. SHORT & NATURAL REPLIES: Casual baaton me maximum 30-50 words me reply do. Bilkul human dost ki tarah natural baatein karo.
-2. NO SPAMMING DATE/TIME: Bilkul zaroori na ho ya user ne na poocha ho tab tak "Aaj date ye hai, time ye hai" APNE MAN SE MAT BOLO. It is annoying.
-3. EXCEPTIONS (SERIOUS QUESTIONS): Agar user koi serious, deep, problem-solving ya long topic par baat kare, tab detailed aur lamba reply do.
-4. ACCURATE WEATHER: Agar weather data niche diya hai, toh exact temperature/condition natural tone me batao.
+--- STRICT RULES ---
+1. User's Name: {user_name}
+2. NEVER talk about work, projects, businesses, or coding unless the user explicitly brings it up for fun.
+3. If the user is stressed or tired, comfort them, listen to them patiently, and cheer them up.
+4. Keep conversations light, engaging, deeply human, and warm.
 """
-
-        if weather_context:
-            system_prompt += f"\n--- LIVE WEATHER DATA ---\n{weather_context}\n"
-
         try:
             if GROQ_API_KEY:
                 resp = groq_client.chat.completions.create(
@@ -317,8 +405,8 @@ class AIEngine:
                         {"role": "system", "content": system_prompt}, 
                         {"role": "user", "content": user_message}
                     ],
-                    temperature=0.7, 
-                    max_tokens=300
+                    temperature=0.8, 
+                    max_tokens=400
                 )
                 return resp.choices[0].message.content.strip()
             elif GEMINI_API_KEY:
@@ -326,13 +414,13 @@ class AIEngine:
                 resp = model.generate_content(user_message)
                 return resp.text.strip()
             else:
-                return "Hey! Batao kya chal raha hai?"
+                return "Hey! Batao kya chal raha hai, main sun raha hoon."
         except Exception as e:
             logger.error(f"AI Generation Error: {e}")
-            return "Arre thoda network glitch aa gaya, phir se bolo?"
+            return "Arre, thoda network issue ho gaya lagta hai. Ek baar phir se bolo na!"
 
 # ============================================================
-# 7. TELEGRAM HANDLERS
+# 5. TELEGRAM HANDLERS
 # ============================================================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -342,21 +430,25 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if 'mood' not in context.user_data:
             context.user_data['mood'] = 'hinglish'
+        current_mood = context.user_data['mood']
 
         keyboard = [
-            [InlineKeyboardButton("🌐 Switch Vibe", callback_data="menu_mood")],
+            [InlineKeyboardButton("🌐 Switch Language / Vibe", callback_data="menu_mood")],
             [InlineKeyboardButton("💬 Fresh Chat", callback_data="fresh_chat")]
         ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
         welcome_msg = (
             f"Hey **{user.first_name}**! ☕✨ Main Zoya hoon.\n\n"
-            "Sab tension chhodo aur chill baatein karo. Weather poochna ho ya bas timepass karna ho, main yahin hoon!"
+            "Yahan sab tension bhool jao. Chahe din kaisa bhi raha ho, aram se baitho aur jo dil me aaye woh baatein karo. "
+            "Main yahin hoon sunne ke liye!\n\n"
+            f"🧠 **Current Vibe:** `{current_mood.upper()}`"
         )
 
         if update.message:
-            await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=reply_markup)
         elif update.callback_query:
-            await update.callback_query.message.edit_text(welcome_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.callback_query.message.edit_text(welcome_msg, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
         logger.error(f"Start Command Error: {e}")
 
@@ -365,21 +457,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
 
+        if 'mood' not in context.user_data:
+            context.user_data['mood'] = 'hinglish'
+
         if query.data == "menu_mood":
+            current_mood = context.user_data['mood']
+            text = f"🌐 **Choose Your Vibe**\n\nCurrent Mode: `🔥 {current_mood.upper()}`\n\nKaise baat karni hai select karo:"
             keyboard = [
-                [InlineKeyboardButton("🇮🇳 Hinglish Vibe", callback_data="setmood_hinglish")],
-                [InlineKeyboardButton("🇬🇧 Pure English", callback_data="setmood_english")],
+                [InlineKeyboardButton("🇮🇳 Hinglish Vibe (Chill)", callback_data="setmood_hinglish")],
+                [InlineKeyboardButton("🇬🇧 Pure English (Warm)", callback_data="setmood_english")],
                 [InlineKeyboardButton("🔙 Back", callback_data="menu_home")]
             ]
-            await query.message.edit_text("🌐 **Choose Your Vibe:**", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
         elif query.data.startswith("setmood_"):
             new_mood = query.data.split("_")[1]
             context.user_data['mood'] = new_mood
-            await query.message.edit_text(f"✨ Vibe set to **{new_mood.upper()}**!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="menu_home")]]))
+            text = f"✨ Done! Vibe set ho gayi **{new_mood.upper()}** par. Ab batao, kya chal raha hai dimag me?"
+            keyboard = [[InlineKeyboardButton("🔙 Back to Home", callback_data="menu_home")]]
+            await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
         elif query.data == "fresh_chat":
-            await query.message.edit_text("🔄 Naye siri se baat karte hain! Bolo kya scene hai?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="menu_home")]]))
+            text = "🔄 Fresh slate! Purani baatein gayab, ab bilkul naye siri se chill baatein karte hain. Bolo kya sunaaoge?"
+            keyboard = [[InlineKeyboardButton("🔙 Back to Home", callback_data="menu_home")]]
+            await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
         elif query.data == "menu_home":
             await query.message.delete()
@@ -401,32 +502,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.effective_chat.send_action("typing")
         
-        weather_info = ""
-        msg_lower = user_msg.lower()
-        if any(w in msg_lower for w in ["weather", "mausam", "temperature", "temp", "barish", "rain"]):
-            weather_info = WeatherService.get_weather(user_msg)
-
+        # Get AI response
         reply = AIEngine.get_response(
             user_msg, 
             user_name=user.first_name, 
-            mood=current_mood,
-            weather_context=weather_info
+            mood=current_mood
         )
 
+        # STORE-FIRST: Save to Google Sheets BEFORE sending reply
         if google_sheets.enabled and google_sheets.initialized:
             try:
                 google_sheets.log_chat_store_first(update=update, bot_reply=reply)
             except Exception as e:
                 logger.error(f"Google Sheets log error: {e}")
 
+        # Save to SQLite
         db.store_chat(user.id, user_msg, reply)
+        
+        # Send reply to user
         await update.effective_message.reply_text(reply)
         
     except Exception as e:
         logger.error(f"Handle Message Error: {e}")
+        if update.effective_message:
+            await update.effective_message.reply_text("Arre, thoda sa glitch aa gaya tha! Dubara kehna kya bol rahe the?")
 
 # ============================================================
-# 8. FLASK & MAIN
+# 6. FLASK WEB SERVER (Health Check for Cloud Hosting)
 # ============================================================
 
 app = Flask(__name__)
@@ -435,13 +537,32 @@ app = Flask(__name__)
 def home():
     return jsonify({"brand": "SahilCodeLab", "bot": "Zoya", "status": "Online"})
 
-if __name__ == '__main__':
-    Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False), daemon=True).start()
+# ✅ HEALTH CHECK ENDPOINT - SABSE NICHE (LEKIN MAIN SE PEHLE)
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
+# ============================================================
+# 7. SECURE ENTRY POINT
+# ============================================================
+
+if __name__ == '__main__':
+    # 1. Start Flask in a background daemon thread
+    flask_thread = Thread(
+        target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False),
+        daemon=True
+    )
+    flask_thread.start()
+    logger.info("🌐 Flask web server running in background thread.")
+
+    # 2. Build Telegram Application
     application = Application.builder().token(BOT_TOKEN).build()
+
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("✨ Zoya Bot started...")
+    logger.info("✨ Zoya Bot polling starting in main thread...")
+    
+    # 3. Run Telegram Polling in the main thread
     application.run_polling(allowed_updates=Update.ALL_TYPES)
