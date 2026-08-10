@@ -168,7 +168,7 @@ class GoogleSheets3TabManager:
             self.sheet = client.open_by_key(self.spreadsheet_id)
             self.initialized = True
             
-            # Auto-setup headers
+            # Auto-setup headers securely
             self._setup_headers()
             print("✅ Google Sheets 3-Tab System Connected Successfully!", flush=True)
         except Exception as e:
@@ -187,7 +187,8 @@ class GoogleSheets3TabManager:
                 ws = self.sheet.worksheet(tab)
                 current_headers = ws.row_values(1)
                 if not current_headers or current_headers[0] != headers[0]:
-                    ws.update('A1:[{}1]'.format(chr(64+len(headers))), [headers])
+                    end_column = chr(64 + len(headers))
+                    ws.update(f'A1:{end_column}1', [headers])
             except Exception as e:
                 print(f"⚠️ Header setup skipped for {tab}: {e}", flush=True)
 
