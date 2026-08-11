@@ -1,6 +1,6 @@
 """
-Zoya & Kabir Telegram Bot - Ultimate Human‑Like AI with Auto Persona & Advanced Reasoning
-Developer: SahilCodeLab (Advanced Edition)
+Zoya & Kabir Telegram Bot – Ultimate Human‑Like AI with Auto Persona
+Developer: SahilCodeLab (Final Edition)
 """
 
 import os
@@ -46,7 +46,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. LOCAL SQLITE DATABASE (same as before, small additions)
+# 2. LOCAL SQLITE DATABASE
 # ============================================================
 class Database:
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -61,7 +61,7 @@ class Database:
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     name TEXT,
-                    gender TEXT DEFAULT 'auto',   -- 'girl' or 'boy' persona after detection
+                    gender TEXT DEFAULT 'auto',
                     total_interactions INTEGER DEFAULT 0
                 )''')
                 c.execute('''CREATE TABLE IF NOT EXISTS chat_history (
@@ -117,7 +117,7 @@ class Database:
         except Exception as e:
             logger.error(f"Store Chat Error: {e}")
 
-    def get_chat_history(self, user_id: int, limit: int = 6) -> list:   # increased context window
+    def get_chat_history(self, user_id: int, limit: int = 6) -> list:
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
@@ -143,17 +143,12 @@ class Database:
 db = Database()
 
 # ============================================================
-# 3. NAME‑BASED GENDER DETECTION (AUTOMATIC PERSONA SELECTOR)
+# 3. AUTO PERSONA DETECTION (name‑based)
 # ============================================================
-# Tries gender‑guesser library, falls back to simple heuristic for Indian names.
 def detect_gender_from_name(name: str) -> str:
-    """
-    Returns 'male', 'female', or 'unknown'.
-    We map 'male' → persona 'girl' (Zoya), 'female' → persona 'boy' (Kabir).
-    """
     if not name:
         return "unknown"
-    name = name.strip().split()[0]  # first name only
+    name = name.strip().split()[0]
     try:
         import gender_guesser.detector as gender_detector
         d = gender_detector.Detector()
@@ -162,12 +157,10 @@ def detect_gender_from_name(name: str) -> str:
             return "male"
         elif result in ("female", "mostly_female"):
             return "female"
-    except Exception:
+    except:
         pass
-
-    # Heuristic for common Indian names (non‑exhaustive)
     male_endings = ["kumar", "raj", "esh", "ansh", "it", "deep", "jeet", "preet", "bir", "pal"]
-    female_endings = ["kumari", "devi", "kaur", "preet", "leen", "jeet", "pal"]  # some overlap but we try
+    female_endings = ["kumari", "devi", "kaur", "preet", "leen", "jeet", "pal"]
     name_lower = name.lower()
     for suffix in female_endings:
         if name_lower.endswith(suffix):
@@ -178,11 +171,6 @@ def detect_gender_from_name(name: str) -> str:
     return "unknown"
 
 def auto_set_persona(user_id: int, first_name: str) -> str:
-    """
-    Automatically determines persona based on name.
-    Saves it to DB and returns the gender key ('girl'/'boy').
-    Rule: If user is male → Zoya (girl), if female → Kabir (boy), unknown → default Zoya.
-    """
     detected = detect_gender_from_name(first_name)
     if detected == "male":
         db.set_user_gender(user_id, "girl")
@@ -191,11 +179,11 @@ def auto_set_persona(user_id: int, first_name: str) -> str:
         db.set_user_gender(user_id, "boy")
         return "boy"
     else:
-        db.set_user_gender(user_id, "girl")   # fallback
+        db.set_user_gender(user_id, "girl")  # default Zoya
         return "girl"
 
 # ============================================================
-# 4. GOOGLE SHEETS ENTERPRISE MANAGER (same as before)
+# 4. GOOGLE SHEETS 3‑TAB MANAGER (unchanged)
 # ============================================================
 class GoogleSheets3TabManager:
     def __init__(self):
@@ -204,7 +192,6 @@ class GoogleSheets3TabManager:
         self.credentials = GOOGLE_SHEETS_CREDENTIALS
         self.sheet = None
         self.initialized = False
-
         if self.enabled and self.spreadsheet_id and self.credentials:
             self._initialize_client()
 
@@ -212,172 +199,149 @@ class GoogleSheets3TabManager:
         try:
             import gspread
             from oauth2client.service_account import ServiceAccountCredentials
-            
             scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
             creds_dict = json.loads(self.credentials)
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
             client = gspread.authorize(creds)
             self.sheet = client.open_by_key(self.spreadsheet_id)
             self.initialized = True
-            
             self._setup_headers()
-            print("✅ Google Sheets 3-Tab System Connected Successfully!", flush=True)
+            print("✅ Google Sheets connected", flush=True)
         except Exception as e:
-            print(f"❌ Google Sheets Connection Failed: {e}", flush=True)
+            print(f"❌ Sheets error: {e}", flush=True)
             self.enabled = False
 
     def _setup_headers(self):
-        expected_headers = {
+        expected = {
             "User_Chats": ["User ID", "Full Name", "Username", "User Message", "Bot Reply", "Selected Persona", "Date & Time", "Detected Emotion", "New Fact Extracted"],
             "Longterm_Memory": ["Memory ID", "User ID", "Category", "Fact / Detail", "Importance", "Date Added"],
             "User_Profiles": ["User ID", "Full Name", "Username", "Active Persona", "Emotion", "City/Location", "First Seen", "Last Active", "Total Messages"]
         }
-        
-        for tab, headers in expected_headers.items():
+        for tab, headers in expected.items():
             try:
                 ws = self.sheet.worksheet(tab)
-                current_headers = ws.row_values(1)
-                if not current_headers or current_headers[0] != headers[0]:
-                    end_column = chr(64 + len(headers))
-                    ws.update(f'A1:{end_column}1', [headers])
-            except Exception as e:
-                print(f"⚠️ Header setup skipped for {tab}: {e}", flush=True)
+                if not ws.row_values(1) or ws.row_values(1)[0] != headers[0]:
+                    ws.update(f'A1:{chr(64+len(headers))}1', [headers])
+            except: pass
 
     def fetch_longterm_memories(self, user_id: int) -> str:
         if not self.enabled or not self.initialized: return ""
         try:
-            ws_mem = self.sheet.worksheet("Longterm_Memory")
-            records = ws_mem.get_all_records()
-            str_id = str(user_id)
-            
+            ws = self.sheet.worksheet("Longterm_Memory")
+            records = ws.get_all_records()
             facts = []
             for row in records:
-                if str(row.get("User ID", "")).strip() == str_id:
-                    cat = row.get("Category", "")
-                    fact = row.get("Fact / Detail", "")
-                    if fact:
-                        facts.append(f"[{cat}] {fact}" if cat else fact)
-            
+                if str(row.get("User ID","")).strip() == str(user_id):
+                    fact = row.get("Fact / Detail","")
+                    if fact: facts.append(fact)
             return " | ".join(facts) if facts else ""
-        except Exception as e:
-            print(f"⚠️ Error reading Longterm_Memory: {e}", flush=True)
-            return ""
+        except: return ""
 
     def sync_user_data(self, update: Update, bot_reply: str, emotion: str = "Neutral", fact_extracted: str = ""):
         if not self.enabled or not self.initialized: return
-        
         try:
             user = update.effective_user
             msg = update.effective_message
             if not user or not msg: return
-
-            str_user_id = str(user.id)
-            full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-            username = user.username or 'No Username'
-            active_persona = "Zoya" if db.get_user_gender(user.id) == "girl" else "Kabir"
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            # TAB 1: User_Chats
-            try:
-                ws_chats = self.sheet.worksheet("User_Chats")
-                chat_row = [str_user_id, full_name, username, (msg.text or '')[:1000], (bot_reply or '')[:1000], active_persona, now_str, emotion, fact_extracted]
-                ws_chats.append_row(chat_row, value_input_option='USER_ENTERED')
-            except Exception as e:
-                print(f"❌ [User_Chats Write Error]: {e}", flush=True)
-
-            # TAB 2: Longterm_Memory
+            uid = str(user.id)
+            full = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            uname = user.username or 'No Username'
+            persona = "Zoya" if db.get_user_gender(user.id) == "girl" else "Kabir"
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ws_chats = self.sheet.worksheet("User_Chats")
+            ws_chats.append_row([uid, full, uname, (msg.text or '')[:1000], (bot_reply or '')[:1000], persona, now, emotion, fact_extracted], value_input_option='USER_ENTERED')
+            # Longterm Memory
             if fact_extracted.strip():
-                try:
-                    ws_mem = self.sheet.worksheet("Longterm_Memory")
-                    mem_id = len(ws_mem.col_values(1))
-                    mem_row = [mem_id, str_user_id, "General Fact", fact_extracted, "High", datetime.now().strftime("%Y-%m-%d")]
-                    ws_mem.append_row(mem_row, value_input_option='USER_ENTERED')
-                except Exception as e:
-                    print(f"❌ [Longterm_Memory Write Error]: {e}", flush=True)
-
-            # TAB 3: User_Profiles
-            try:
-                ws_prof = self.sheet.worksheet("User_Profiles")
-                user_ids = ws_prof.col_values(1)
-                
-                if str_user_id in user_ids:
-                    row_idx = user_ids.index(str_user_id) + 1
-                    ws_prof.update_cell(row_idx, 4, active_persona)
-                    ws_prof.update_cell(row_idx, 5, emotion)
-                    ws_prof.update_cell(row_idx, 8, now_str)
-                else:
-                    prof_row = [str_user_id, full_name, username, active_persona, emotion, "", now_str, now_str, 1]
-                    ws_prof.append_row(prof_row, value_input_option='USER_ENTERED')
-            except Exception as e:
-                print(f"❌ [User_Profiles Write Error]: {e}", flush=True)
-
-        except Exception as e:
-            print(f"❌ Global Sync Error: {e}", flush=True)
+                ws_mem = self.sheet.worksheet("Longterm_Memory")
+                mem_id = len(ws_mem.col_values(1))
+                ws_mem.append_row([mem_id, uid, "General Fact", fact_extracted, "High", datetime.now().strftime("%Y-%m-%d")], value_input_option='USER_ENTERED')
+            # Profiles
+            ws_prof = self.sheet.worksheet("User_Profiles")
+            col1 = ws_prof.col_values(1)
+            if uid in col1:
+                row = col1.index(uid)+1
+                ws_prof.update_cell(row, 4, persona)
+                ws_prof.update_cell(row, 5, emotion)
+                ws_prof.update_cell(row, 8, now)
+            else:
+                ws_prof.append_row([uid, full, uname, persona, emotion, "", now, now, 1], value_input_option='USER_ENTERED')
+        except: pass
 
 sheets = GoogleSheets3TabManager()
 
 # ============================================================
-# 5. ULTIMATE HUMAN‑LIKE AI ENGINE
+# 5. SAFE MATH EVALUATOR
+# ============================================================
+def safe_math_eval(expression: str) -> str:
+    """If the message is a pure arithmetic expression, return the computed result as a string, else None."""
+    clean = expression.replace(" ", "")
+    if not clean:
+        return None
+    allowed = set("0123456789+-*/().")
+    if all(ch in allowed for ch in clean):
+        try:
+            # Use a restricted eval
+            result = eval(clean, {"__builtins__": None}, {})
+            if isinstance(result, (int, float)):
+                if isinstance(result, float) and result.is_integer():
+                    result = int(result)
+                return str(result)
+        except:
+            return None
+    return None
+
+# ============================================================
+# 6. TRULY HUMAN AI ENGINE (NO ROBOTIC PHRASES)
 # ============================================================
 class AIEngine:
     @staticmethod
     def get_response(user_message: str, user_id: int, user_name: str, persona_gender: str) -> tuple[str, str, str]:
-        """
-        Returns (reply_text, model_used, detected_emotion).
-        persona_gender: 'girl' (Zoya) or 'boy' (Kabir)
-        """
         longterm_facts = sheets.fetch_longterm_memories(user_id)
 
-        # ---- BUILD A NUANCED, HUMAN‑LIKE PROMPT ----
+        # ---- Persona definitions ----
         if persona_gender == "girl":
             persona_name = "Zoya"
-            gender_rules = """
-You are ZOYA, a 22‑year‑old female best friend. You speak in Hinglish (mix of Hindi and English) with a warm, casual tone.
-STRICT IDENTITY RULES:
-- Use female self‑references: 'main theek hoon', 'soch rahi thi', 'aa gayi', 'karti hoon', 'sun rahi hoon', 'yaar'.
-- NEVER use male words for yourself (like 'bhai', 'sunta hoon', 'karta hoon').
-"""
+            identity = "You are ZOYA, a 22‑year‑old female best friend. You ALWAYS use female self‑references: 'main theek hoon', 'soch rahi thi', 'karti hoon'."
         else:
             persona_name = "Kabir"
-            gender_rules = """
-You are KABIR, a 24‑year‑old male best friend. You speak in Hinglish with a cool, friendly vibe.
-STRICT IDENTITY RULES:
-- Use male self‑references: 'main theek hoon', 'soch raha tha', 'karta hoon', 'bro', 'bhai', 'sun raha hoon'.
-- NEVER use female words for yourself (like 'sunti hoon', 'karti hoon').
+            identity = "You are KABIR, a 24‑year‑old male best friend. You ALWAYS use male self‑references: 'main theek hoon', 'soch raha tha', 'karta hoon', 'bro'."
+
+        # ---- Strict human behaviour rules ----
+        system = f"""{identity}
+User's name: {user_name}
+Long‑term facts: {longterm_facts if longterm_facts else 'None'}
+
+CRITICAL HUMAN BEHAVIOR RULES (follow exactly):
+1. READ the user's message carefully. Understand what they want or feel before replying.
+2. NEVER use robotic filler like "sun rahi hoon", "sun raha hoon", "batao", "problem hai kya" unless it naturally fits the EXACT situation. DO NOT start sentences with these.
+3. If the user asks a simple math question like "2+6", you can answer casually (e.g., "8 😄"). For large/complex numbers, say "Arre yaar, itna bada math mere bas ka nahi 😅 Calculator use kar le".
+4. Keep replies warm, short (1-2 sentences), and extremely natural. Use Hinglish, emojis (😄🤔🙌😅✨💬) casually, words like yaar, arre, accha, ohh, haan na.
+5. DO NOT repeat the user's words back in a weird way. Don't ask "kaun saa din" unless you genuinely don't know. Just talk normally.
+6. If the user thanks you, reply simply "Koi nahi yaar 😊" or "Happy to help! 😊".
+7. Incorporate stored facts naturally if relevant, but don't force it.
+8. Use emojis to make the conversation lively, but not every sentence. One or two is fine.
 """
 
-        system_instruction = f"""{gender_rules}
+        # ---- Try local math first (for safe expressions) ----
+        math_result = safe_math_eval(user_message)
+        if math_result:
+            # Friendly math reply
+            reply = f"{math_result} 😄"
+            return reply, "MathEngine", "Neutral"
 
-USER CONTEXT:
-- User's name: {user_name}
-- Long‑term facts you know about this user: {longterm_facts if longterm_facts else 'None'}
-
-YOUR ULTIMATE HUMAN‑LIKE BEHAVIOR RULES:
-1. **READ THE MESSAGE CAREFULLY**: Before replying, understand what the user is really saying or feeling. Don't just match keywords.
-2. **NATURAL LENGTH**: Replies should feel human. They can be 1–3 short sentences, or a bit longer if the conversation demands it. Do NOT cut yourself off artificially.
-3. **AVOID ROBOTIC PHRASES**: Never say generic things like "kya problem hai?", "sun raha hoon", "batao" unless they fit the exact context. Instead, react to the content.
-   - If user says "Hii", reply with a warm, personal greeting, maybe ask about their day, use their name occasionally.
-   - If user shares a feeling, acknowledge it with empathy.
-   - If user asks a question, answer directly and then ask a follow‑up.
-4. **USE EMOJIS & SLANGS NATURALLY**: 🥲😅✨, yaar, bro, arre, accha, ohh, haan na… but don’t overdo it.
-5. **INCORPORATE LONG‑TERM MEMORY**: If you have stored facts about the user, bring them up naturally when relevant. (e.g., "Waise tera woh interview kaisa gaya?")
-6. **KEEP THE FLOW**: Don't repeat the same question the user just asked. If you don't know something, say so casually.
-7. **EMOTION DETECTION (internal)**: Try to sense the user's emotion (happy, sad, excited, angry, neutral) and let your reply reflect that.
-"""
-
-        # ---- CALL AI MODEL ----
+        # ---- AI model ----
         reply = None
         model_used = ""
 
         if GEMINI_API_KEY:
             try:
                 history = db.get_chat_history(user_id, limit=6)
-                gemini_hist = [{"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]} for m in history]
+                gemini_hist = [{"role": "user" if m["role"]=="user" else "model", "parts": [m["content"]]} for m in history]
 
                 model = genai.GenerativeModel(
                     model_name='gemini-1.5-flash',
-                    system_instruction=system_instruction,
-                    generation_config={"temperature": 0.7, "max_output_tokens": 150}
+                    system_instruction=system,
+                    generation_config={"temperature": 0.8, "max_output_tokens": 80}
                 )
                 chat = model.start_chat(history=gemini_hist)
                 resp = chat.send_message(user_message)
@@ -388,12 +352,14 @@ YOUR ULTIMATE HUMAN‑LIKE BEHAVIOR RULES:
 
         if not reply and groq_client:
             try:
-                msgs = [{"role": "system", "content": system_instruction}]
+                msgs = [{"role": "system", "content": system}]
                 msgs.extend(db.get_chat_history(user_id, limit=6))
                 msgs.append({"role": "user", "content": user_message})
-
                 resp = groq_client.chat.completions.create(
-                    model="llama-3.1-8b-instant", messages=msgs, temperature=0.7, max_tokens=150
+                    model="llama-3.1-8b-instant",
+                    messages=msgs,
+                    temperature=0.8,
+                    max_tokens=80
                 )
                 reply = resp.choices[0].message.content.strip()
                 model_used = "Groq-Llama3"
@@ -401,80 +367,84 @@ YOUR ULTIMATE HUMAN‑LIKE BEHAVIOR RULES:
                 logger.error(f"Groq Error: {e}")
 
         if not reply:
-            reply = "Arre yaar, network slow lag raha hai. Ek baar firse bol na?"
+            reply = "Arre yaar, network slow lag raha hai. Ek baar firse bol na? 🫤"
             model_used = "Fallback"
 
-        # ---- DETECT EMOTION FROM USER MESSAGE (simple keyword + heuristics) ----
+        # ---- Emotion detection ----
         emotion = AIEngine.detect_emotion(user_message)
 
         return reply, model_used, emotion
 
     @staticmethod
     def detect_emotion(text: str) -> str:
-        """Lightweight emotion detection for analytics."""
         t = text.lower()
-        if any(w in t for w in ["haha", "😂", "lol", "mast", "badhiya", "super", "party", "khush"]):
-            return "Happy"
-        if any(w in t for w in ["😢", "udaas", "sad", "dukhi", "rona", "bura", "tension", "problem"]):
-            return "Sad"
-        if any(w in t for w in ["😡", "gussa", "anger", "chup", "baat mat kar"]):
-            return "Angry"
-        if any(w in t for w in ["😍", "love", "pyaar", "crush", "beautiful"]):
-            return "Love"
+        if any(w in t for w in ["haha","😂","lol","mast","badhiya","super","khush"]): return "Happy"
+        if any(w in t for w in ["😢","udaas","sad","dukhi","rona"]): return "Sad"
+        if any(w in t for w in ["😡","gussa","anger"]): return "Angry"
         return "Neutral"
 
 # ============================================================
-# 6. TELEGRAM BOT HANDLERS (AUTO PERSONA, NO MANUAL BUTTONS)
+# 7. TELEGRAM HANDLERS
 # ============================================================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.save_user(user.id, user.username, user.first_name)
 
-    # Auto‑detect persona based on name (only if not already set by user override)
     current = db.get_user_gender(user.id)
-    if current == "auto":   # first time
+    if current == "auto":
         persona = auto_set_persona(user.id, user.first_name)
     else:
         persona = current
 
-    bot_name = "👧 Zoya" if persona == "girl" else "👦 Kabir"
+    if persona == "girl":
+        bot_name = "Zoya"
+        emoji = "👧"
+        tagline = "teri nayi bestie"
+    else:
+        bot_name = "Kabir"
+        emoji = "👦"
+        tagline = "tera apna bhai"
 
-    # No manual selection keyboard – just a reset option
+    welcome_text = (
+        f"Oye **{user.first_name}**! 🎉\n"
+        f"Kya haal hai mere dost? 🌟\n"
+        f"Main hoon {emoji} **{bot_name}** – {tagline}!\n"
+        f"Tu bas message kar, jo mann mein aaye, bindaas! 💬😎\n"
+        f"Masti karte hain, baatein karte hain, full dosti mode ON! 🥳✨"
+    )
+
     keyboard = [[InlineKeyboardButton("🔄 Reset Memory", callback_data="fresh_chat")]]
 
-    welcome = (
-        f"Hey **{user.first_name}**! ☕✨\n"
-        f"Main hoon teri **{bot_name}** – tera apna AI best friend.\n"
-        f"Mujhe tera naam dekh ke automatically pata chal gaya ki kaise baat karni hai.\n"
-        f"Bindaas message kar, jo mann mein aaye!"
-    )
-    
     if update.message:
-        await update.message.reply_text(welcome, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(welcome, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text(
+            welcome_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.callback_query.message.edit_text(
+            welcome_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.clear_user_history(update.effective_user.id)
-    await update.message.reply_text("🧹 Saari purani chat memory saaf kar di! Fresh start.")
+    await update.message.reply_text("🧹 Purani chat memory saaf! Fresh start. 😇")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     if query.data == "fresh_chat":
         db.clear_user_history(query.from_user.id)
-        await query.message.edit_text("🔄 Memory reset! Ab bilkul fresh conversation hogi.")
-    # Removed gender selection buttons
+        await query.message.edit_text("🔄 Memory reset! Ab bilkul fresh conversation hogi. 😎")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_message.text:
         return
-    
     user = update.effective_user
     user_msg = update.effective_message.text
     persona = db.get_user_gender(user.id)
-    # Fallback if somehow still 'auto'
     if persona == "auto":
         persona = auto_set_persona(user.id, user.first_name)
 
@@ -485,14 +455,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     db.store_chat(user.id, user_msg, reply)
-
-    # Sync to Google Sheets in background
     Thread(target=sheets.sync_user_data, args=(update, reply, emotion, ""), daemon=True).start()
 
     await update.effective_message.reply_text(reply)
 
 # ============================================================
-# 7. FLASK SERVER & ENTRYPOINT
+# 8. FLASK SERVER & ENTRYPOINT
 # ============================================================
 app = Flask(__name__)
 
@@ -500,20 +468,21 @@ app = Flask(__name__)
 def home():
     return jsonify({
         "brand": "SahilCodeLab",
-        "bot": "Zoya/Kabir - Human‑Like AI",
-        "persona_selection": "Automatic (name‑based)",
-        "status": "Online"
+        "status": "Human‑Like AI Online",
+        "persona_selection": "Auto (name‑based)",
+        "features": "Warm welcome, anti‑robotic replies, safe math, long‑term memory"
     })
 
 if __name__ == '__main__':
-    # Start Flask health check
+    # Start Flask in daemon thread for health checks
     Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False), daemon=True).start()
 
+    # Build Telegram bot
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("reset", reset_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("✨ Advanced Human‑Like Bot Activated. Auto persona + powerful AI.", flush=True)
+    print("✨ Human‑Like Bot Activated with Auto Persona, Warm Welcome & Safe Math.", flush=True)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
