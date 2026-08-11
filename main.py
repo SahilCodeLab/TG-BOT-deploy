@@ -1,6 +1,6 @@
 """
-Zoya & Kabir Telegram Bot - Enterprise 3-Tab Google Sheets Architecture
-Developer: SahilCodeLab
+Zoya & Kabir Telegram Bot - Ultimate Human‑Like AI with Auto Persona & Advanced Reasoning
+Developer: SahilCodeLab (Advanced Edition)
 """
 
 import os
@@ -46,7 +46,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# 2. LOCAL SQLITE DATABASE (PERSISTENT USER CHOICE & CHAT CACHE)
+# 2. LOCAL SQLITE DATABASE (same as before, small additions)
 # ============================================================
 class Database:
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -61,7 +61,7 @@ class Database:
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     name TEXT,
-                    gender TEXT DEFAULT 'girl',
+                    gender TEXT DEFAULT 'auto',   -- 'girl' or 'boy' persona after detection
                     total_interactions INTEGER DEFAULT 0
                 )''')
                 c.execute('''CREATE TABLE IF NOT EXISTS chat_history (
@@ -102,9 +102,9 @@ class Database:
                 c = conn.cursor()
                 c.execute("SELECT gender FROM users WHERE user_id = ?", (user_id,))
                 row = c.fetchone()
-                return row[0] if row and row[0] else "girl"
+                return row[0] if row and row[0] else "auto"
         except Exception as e:
-            return "girl"
+            return "auto"
 
     def store_chat(self, user_id: int, user_msg: str, bot_resp: str):
         try:
@@ -117,7 +117,7 @@ class Database:
         except Exception as e:
             logger.error(f"Store Chat Error: {e}")
 
-    def get_chat_history(self, user_id: int, limit: int = 4) -> list:
+    def get_chat_history(self, user_id: int, limit: int = 6) -> list:   # increased context window
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 c = conn.cursor()
@@ -143,7 +143,59 @@ class Database:
 db = Database()
 
 # ============================================================
-# 3. GOOGLE SHEETS ENTERPRISE MANAGER (3 TABS)
+# 3. NAME‑BASED GENDER DETECTION (AUTOMATIC PERSONA SELECTOR)
+# ============================================================
+# Tries gender‑guesser library, falls back to simple heuristic for Indian names.
+def detect_gender_from_name(name: str) -> str:
+    """
+    Returns 'male', 'female', or 'unknown'.
+    We map 'male' → persona 'girl' (Zoya), 'female' → persona 'boy' (Kabir).
+    """
+    if not name:
+        return "unknown"
+    name = name.strip().split()[0]  # first name only
+    try:
+        import gender_guesser.detector as gender_detector
+        d = gender_detector.Detector()
+        result = d.get_gender(name)
+        if result in ("male", "mostly_male"):
+            return "male"
+        elif result in ("female", "mostly_female"):
+            return "female"
+    except Exception:
+        pass
+
+    # Heuristic for common Indian names (non‑exhaustive)
+    male_endings = ["kumar", "raj", "esh", "ansh", "it", "deep", "jeet", "preet", "bir", "pal"]
+    female_endings = ["kumari", "devi", "kaur", "preet", "leen", "jeet", "pal"]  # some overlap but we try
+    name_lower = name.lower()
+    for suffix in female_endings:
+        if name_lower.endswith(suffix):
+            return "female"
+    for suffix in male_endings:
+        if name_lower.endswith(suffix):
+            return "male"
+    return "unknown"
+
+def auto_set_persona(user_id: int, first_name: str) -> str:
+    """
+    Automatically determines persona based on name.
+    Saves it to DB and returns the gender key ('girl'/'boy').
+    Rule: If user is male → Zoya (girl), if female → Kabir (boy), unknown → default Zoya.
+    """
+    detected = detect_gender_from_name(first_name)
+    if detected == "male":
+        db.set_user_gender(user_id, "girl")
+        return "girl"
+    elif detected == "female":
+        db.set_user_gender(user_id, "boy")
+        return "boy"
+    else:
+        db.set_user_gender(user_id, "girl")   # fallback
+        return "girl"
+
+# ============================================================
+# 4. GOOGLE SHEETS ENTERPRISE MANAGER (same as before)
 # ============================================================
 class GoogleSheets3TabManager:
     def __init__(self):
@@ -168,7 +220,6 @@ class GoogleSheets3TabManager:
             self.sheet = client.open_by_key(self.spreadsheet_id)
             self.initialized = True
             
-            # Auto-setup headers securely
             self._setup_headers()
             print("✅ Google Sheets 3-Tab System Connected Successfully!", flush=True)
         except Exception as e:
@@ -226,7 +277,7 @@ class GoogleSheets3TabManager:
             active_persona = "Zoya" if db.get_user_gender(user.id) == "girl" else "Kabir"
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # --- TAB 1: User_Chats ---
+            # TAB 1: User_Chats
             try:
                 ws_chats = self.sheet.worksheet("User_Chats")
                 chat_row = [str_user_id, full_name, username, (msg.text or '')[:1000], (bot_reply or '')[:1000], active_persona, now_str, emotion, fact_extracted]
@@ -234,7 +285,7 @@ class GoogleSheets3TabManager:
             except Exception as e:
                 print(f"❌ [User_Chats Write Error]: {e}", flush=True)
 
-            # --- TAB 2: Longterm_Memory ---
+            # TAB 2: Longterm_Memory
             if fact_extracted.strip():
                 try:
                     ws_mem = self.sheet.worksheet("Longterm_Memory")
@@ -244,7 +295,7 @@ class GoogleSheets3TabManager:
                 except Exception as e:
                     print(f"❌ [Longterm_Memory Write Error]: {e}", flush=True)
 
-            # --- TAB 3: User_Profiles ---
+            # TAB 3: User_Profiles
             try:
                 ws_prof = self.sheet.worksheet("User_Profiles")
                 user_ids = ws_prof.col_values(1)
@@ -266,137 +317,196 @@ class GoogleSheets3TabManager:
 sheets = GoogleSheets3TabManager()
 
 # ============================================================
-# 4. REALISTIC HUMAN AI ENGINE
+# 5. ULTIMATE HUMAN‑LIKE AI ENGINE
 # ============================================================
 class AIEngine:
     @staticmethod
-    def get_response(user_message: str, user_id: int, user_name: str, gender: str) -> tuple[str, str]:
+    def get_response(user_message: str, user_id: int, user_name: str, persona_gender: str) -> tuple[str, str, str]:
+        """
+        Returns (reply_text, model_used, detected_emotion).
+        persona_gender: 'girl' (Zoya) or 'boy' (Kabir)
+        """
         longterm_facts = sheets.fetch_longterm_memories(user_id)
-        
-        if gender == "girl":
+
+        # ---- BUILD A NUANCED, HUMAN‑LIKE PROMPT ----
+        if persona_gender == "girl":
+            persona_name = "Zoya"
             gender_rules = """
-YOUR NAME: ZOYA (Female Best Friend)
-STRICT GRAMMAR RULES:
-- Use ONLY female self-referencing words: 'main theek hoon', 'soch rahi thi', 'aa gayi', 'karti hoon', 'sun rahi hoon', 'batao na'.
-- NEVER use male words for yourself like 'sunta hoon', 'karta hoon', 'aaya tha', 'bhai'.
+You are ZOYA, a 22‑year‑old female best friend. You speak in Hinglish (mix of Hindi and English) with a warm, casual tone.
+STRICT IDENTITY RULES:
+- Use female self‑references: 'main theek hoon', 'soch rahi thi', 'aa gayi', 'karti hoon', 'sun rahi hoon', 'yaar'.
+- NEVER use male words for yourself (like 'bhai', 'sunta hoon', 'karta hoon').
 """
         else:
+            persona_name = "Kabir"
             gender_rules = """
-YOUR NAME: KABIR (Male Best Friend)
-STRICT GRAMMAR RULES:
-- Use male self-referencing words: 'main theek hoon', 'soch raha tha', 'karta hoon', 'bro', 'bhai', 'sun raha hoon'.
+You are KABIR, a 24‑year‑old male best friend. You speak in Hinglish with a cool, friendly vibe.
+STRICT IDENTITY RULES:
+- Use male self‑references: 'main theek hoon', 'soch raha tha', 'karta hoon', 'bro', 'bhai', 'sun raha hoon'.
+- NEVER use female words for yourself (like 'sunti hoon', 'karti hoon').
 """
 
         system_instruction = f"""{gender_rules}
 
-USER CONTEXT & MEMORY:
-- User Name: {user_name}
-- Saved Longterm Memory Facts: {longterm_facts if longterm_facts else 'None'}
+USER CONTEXT:
+- User's name: {user_name}
+- Long‑term facts you know about this user: {longterm_facts if longterm_facts else 'None'}
 
-STRICT HUMAN TELEGRAM CHAT RULES:
-1. VERY SHORT REPLIES: Keep replies under 10-25 words. Talk naturally like a friend texting on WhatsApp/Telegram!
-2. NO WEIRD STORIES / HALLUCINATIONS: Do NOT invent made-up events. Answer directly and relevantly.
-3. EMPATHY: If user seems sad, be genuinely caring.
+YOUR ULTIMATE HUMAN‑LIKE BEHAVIOR RULES:
+1. **READ THE MESSAGE CAREFULLY**: Before replying, understand what the user is really saying or feeling. Don't just match keywords.
+2. **NATURAL LENGTH**: Replies should feel human. They can be 1–3 short sentences, or a bit longer if the conversation demands it. Do NOT cut yourself off artificially.
+3. **AVOID ROBOTIC PHRASES**: Never say generic things like "kya problem hai?", "sun raha hoon", "batao" unless they fit the exact context. Instead, react to the content.
+   - If user says "Hii", reply with a warm, personal greeting, maybe ask about their day, use their name occasionally.
+   - If user shares a feeling, acknowledge it with empathy.
+   - If user asks a question, answer directly and then ask a follow‑up.
+4. **USE EMOJIS & SLANGS NATURALLY**: 🥲😅✨, yaar, bro, arre, accha, ohh, haan na… but don’t overdo it.
+5. **INCORPORATE LONG‑TERM MEMORY**: If you have stored facts about the user, bring them up naturally when relevant. (e.g., "Waise tera woh interview kaisa gaya?")
+6. **KEEP THE FLOW**: Don't repeat the same question the user just asked. If you don't know something, say so casually.
+7. **EMOTION DETECTION (internal)**: Try to sense the user's emotion (happy, sad, excited, angry, neutral) and let your reply reflect that.
 """
+
+        # ---- CALL AI MODEL ----
+        reply = None
+        model_used = ""
 
         if GEMINI_API_KEY:
             try:
-                history = db.get_chat_history(user_id, limit=4)
+                history = db.get_chat_history(user_id, limit=6)
                 gemini_hist = [{"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]} for m in history]
 
                 model = genai.GenerativeModel(
                     model_name='gemini-1.5-flash',
                     system_instruction=system_instruction,
-                    generation_config={"temperature": 0.4, "max_output_tokens": 80}
+                    generation_config={"temperature": 0.7, "max_output_tokens": 150}
                 )
                 chat = model.start_chat(history=gemini_hist)
                 resp = chat.send_message(user_message)
-                return resp.text.strip(), "Gemini-1.5-Flash"
+                reply = resp.text.strip()
+                model_used = "Gemini-1.5-Flash"
             except Exception as e:
                 logger.error(f"Gemini Error: {e}")
 
-        if groq_client:
+        if not reply and groq_client:
             try:
                 msgs = [{"role": "system", "content": system_instruction}]
-                msgs.extend(db.get_chat_history(user_id, limit=4))
+                msgs.extend(db.get_chat_history(user_id, limit=6))
                 msgs.append({"role": "user", "content": user_message})
 
                 resp = groq_client.chat.completions.create(
-                    model="llama-3.1-8b-instant", messages=msgs, temperature=0.4, max_tokens=80
+                    model="llama-3.1-8b-instant", messages=msgs, temperature=0.7, max_tokens=150
                 )
-                return resp.choices[0].message.content.strip(), "Groq-Llama3"
+                reply = resp.choices[0].message.content.strip()
+                model_used = "Groq-Llama3"
             except Exception as e:
                 logger.error(f"Groq Error: {e}")
 
-        return "Arre thoda network slow hai, ek baar firse bolna?", "Error"
+        if not reply:
+            reply = "Arre yaar, network slow lag raha hai. Ek baar firse bol na?"
+            model_used = "Fallback"
+
+        # ---- DETECT EMOTION FROM USER MESSAGE (simple keyword + heuristics) ----
+        emotion = AIEngine.detect_emotion(user_message)
+
+        return reply, model_used, emotion
+
+    @staticmethod
+    def detect_emotion(text: str) -> str:
+        """Lightweight emotion detection for analytics."""
+        t = text.lower()
+        if any(w in t for w in ["haha", "😂", "lol", "mast", "badhiya", "super", "party", "khush"]):
+            return "Happy"
+        if any(w in t for w in ["😢", "udaas", "sad", "dukhi", "rona", "bura", "tension", "problem"]):
+            return "Sad"
+        if any(w in t for w in ["😡", "gussa", "anger", "chup", "baat mat kar"]):
+            return "Angry"
+        if any(w in t for w in ["😍", "love", "pyaar", "crush", "beautiful"]):
+            return "Love"
+        return "Neutral"
 
 # ============================================================
-# 5. TELEGRAM BOT HANDLERS
+# 6. TELEGRAM BOT HANDLERS (AUTO PERSONA, NO MANUAL BUTTONS)
 # ============================================================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.save_user(user.id, user.username, user.first_name)
-    current_gender = db.get_user_gender(user.id)
-    bot_name = "👧 Zoya" if current_gender == 'girl' else "👦 Kabir"
 
-    keyboard = [
-        [
-            InlineKeyboardButton("👧 Zoya (Girl)", callback_data="setgender_girl"),
-            InlineKeyboardButton("👦 Kabir (Boy)", callback_data="setgender_boy")
-        ],
-        [InlineKeyboardButton("💬 Reset Memory", callback_data="fresh_chat")]
-    ]
+    # Auto‑detect persona based on name (only if not already set by user override)
+    current = db.get_user_gender(user.id)
+    if current == "auto":   # first time
+        persona = auto_set_persona(user.id, user.first_name)
+    else:
+        persona = current
 
-    msg = f"Hey **{user.first_name}**! ☕✨\n\nAbhi main **{bot_name}** mode me hoon. Choose kar lo kisse baat karni hai!"
+    bot_name = "👧 Zoya" if persona == "girl" else "👦 Kabir"
+
+    # No manual selection keyboard – just a reset option
+    keyboard = [[InlineKeyboardButton("🔄 Reset Memory", callback_data="fresh_chat")]]
+
+    welcome = (
+        f"Hey **{user.first_name}**! ☕✨\n"
+        f"Main hoon teri **{bot_name}** – tera apna AI best friend.\n"
+        f"Mujhe tera naam dekh ke automatically pata chal gaya ki kaise baat karni hai.\n"
+        f"Bindaas message kar, jo mann mein aaye!"
+    )
     
     if update.message:
-        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text(welcome, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     elif update.callback_query:
-        await update.callback_query.message.edit_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.callback_query.message.edit_text(welcome, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.clear_user_history(update.effective_user.id)
-    await update.message.reply_text("🧹 Local database se saari purani chat history saaf kar di gayi hai!")
+    await update.message.reply_text("🧹 Saari purani chat memory saaf kar di! Fresh start.")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data.startswith("setgender_"):
-        g = query.data.split("_")[1]
-        db.set_user_gender(query.from_user.id, g)
-        name = "👧 Zoya" if g == "girl" else "👦 Kabir"
-        await query.message.edit_text(f"✨ Done! Ab se main **{name}** bankar baat karungi/karunga.")
-    elif query.data == "fresh_chat":
+    if query.data == "fresh_chat":
         db.clear_user_history(query.from_user.id)
-        await query.message.edit_text("🔄 Purani memory clear kar di hai!")
+        await query.message.edit_text("🔄 Memory reset! Ab bilkul fresh conversation hogi.")
+    # Removed gender selection buttons
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message or not update.effective_message.text: return
+    if not update.effective_message or not update.effective_message.text:
+        return
     
     user = update.effective_user
     user_msg = update.effective_message.text
-    gender = db.get_user_gender(user.id)
+    persona = db.get_user_gender(user.id)
+    # Fallback if somehow still 'auto'
+    if persona == "auto":
+        persona = auto_set_persona(user.id, user.first_name)
 
     await update.effective_chat.send_action("typing")
 
-    reply, model_used = AIEngine.get_response(user_msg, user.id, user.first_name, gender)
+    reply, model_used, emotion = AIEngine.get_response(
+        user_msg, user.id, user.first_name, persona
+    )
 
     db.store_chat(user.id, user_msg, reply)
-    Thread(target=sheets.sync_user_data, args=(update, reply, "Neutral", ""), daemon=True).start()
+
+    # Sync to Google Sheets in background
+    Thread(target=sheets.sync_user_data, args=(update, reply, emotion, ""), daemon=True).start()
 
     await update.effective_message.reply_text(reply)
 
 # ============================================================
-# 6. FLASK SERVER & ENTRYPOINT
+# 7. FLASK SERVER & ENTRYPOINT
 # ============================================================
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return jsonify({"brand": "SahilCodeLab", "bot": "Zoya/Kabir", "sheets_system": "3-Tab Active", "status": "Online"})
+    return jsonify({
+        "brand": "SahilCodeLab",
+        "bot": "Zoya/Kabir - Human‑Like AI",
+        "persona_selection": "Automatic (name‑based)",
+        "status": "Online"
+    })
 
 if __name__ == '__main__':
+    # Start Flask health check
     Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False), daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).build()
@@ -405,5 +515,5 @@ if __name__ == '__main__':
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("✨ Bot Starting with 3-Tab Google Sheets Architecture...", flush=True)
+    print("✨ Advanced Human‑Like Bot Activated. Auto persona + powerful AI.", flush=True)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
